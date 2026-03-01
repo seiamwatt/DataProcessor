@@ -192,6 +192,7 @@ def batch_processing(df_batch, api_key,pdf_url_column, extract_text=True):
 
 
 def main():
+    print("filter")
 
     load_dotenv()
     parser = argparse.ArgumentParser(description="Identify annual reports from PDF URLs using DeepSeek")

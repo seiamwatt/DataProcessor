@@ -103,10 +103,12 @@ Respond ONLY with valid JSON:
   "Y1": "<main issue in ≤10 words>"
 }}"""
 
-def create_prompt_Y2(pdf_url, pdf_text):
+def create_prompt_Y2(pdf_url, pdf_text,Y1_response):
     return f"""You are an expert political and policy analyst. Analyze the following report and answer the question precisely in the specified format. Do not add extra commentary beyond what is requested.
 
 SOURCE URL: {pdf_url}
+
+The issue is: {Y1_response}
 
 --- BEGIN REPORT TEXT ---
 {pdf_text}
@@ -137,7 +139,7 @@ Respond ONLY with valid JSON:
 {{ "Y2": <integer 0-100> }}"""
 
 
-def create_prompt_Y3(pdf_url, pdf_text):
+def create_prompt_Y3(pdf_url, pdf_text,Y1_response,Y2_response):
     return f"""You are an expert political and policy analyst. Analyze the following report and answer the question precisely in the specified format. Do not add extra commentary beyond what is requested.
 
 SOURCE URL: {pdf_url}
@@ -147,6 +149,8 @@ SOURCE URL: {pdf_url}
 --- END REPORT TEXT ---
 
 **Y3 – Supporting Evidence (1–2 direct quotes):**
+Issue: {Y1_response}
+Reponse: {Y2_response}
 Extract one or two verbatim quotes from the report that best justify the main issue and position strength above. Include only exact text from the document.
 
 Respond ONLY with valid JSON:
@@ -200,7 +204,7 @@ def connect_to_DeepSeek(api_key,prompt,chat_model=None,max_tries=None):
             payload = {
                 "model": chat_model,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 5000,
+                "max_tokens": 3000,
                 "temperature": 0,
             }
 
@@ -235,7 +239,7 @@ def connect_to_GPT(api_key,prompt,chat_model=None,max_tries=None):
             response = client.chat.completions.create(
                 model=chat_model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=5000,
+                max_tokens=3000,
                 temperature=0,
             )
 
@@ -269,7 +273,7 @@ def connect_to_Gemini(api_key,prompt,chat_model=None,max_tries=None):
                 contents = prompt,
                 config = types.GenerateContentConfig(
                     thinking_config=types.ThinkingConfig(thinking_level="high",include_thoughts=False),
-                    max_output_tokens=5000
+                    max_output_tokens=3000
                 ) 
             )  
 
@@ -285,19 +289,18 @@ def connect_to_Gemini(api_key,prompt,chat_model=None,max_tries=None):
                 print("all tries completed")
                 return None
 
-
 def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key, batch_num=0, total_rows=0, rows_done=0):
 
     results = []
     batch_size = len(df_batch)
 
-    for row_in_batch, (idx, row) in enumerate(df_batch.iterrows(), 1):
-        current_total = rows_done + row_in_batch
-        print(f"\n--- Row {current_total}/{total_rows} (batch {batch_num}, row {row_in_batch}/{batch_size}) ---")
+    for rows_in_batch, (idx, row) in enumerate(df_batch.iterrows(), 1):
+        current_total = rows_done + rows_in_batch
+        print(f"\n--- Row {current_total}/{total_rows} (batch {batch_num}, row {rows_in_batch}/{batch_size}) ---")
 
-        result_row_DeepSeek = row.to_dict() 
-        result_row_Gemini = row.to_dict() 
-        result_row_GPT = row.to_dict() 
+        result_row_DeepSeek = row.to_dict()
+        result_row_Gemini = row.to_dict()
+        result_row_GPT = row.to_dict()
 
         pdf_url = row[pdf_url_column]
 
@@ -311,38 +314,45 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
         else:
             print(f"  PDF extracted: {len(pdf_txt)} chars, {elapsed:.1f}s")
 
-        prompt_Y1 = create_prompt_Y1(pdf_url=pdf_url,pdf_text=pdf_txt)
-        prompt_Y2 = create_prompt_Y2(pdf_url=pdf_url,pdf_text=pdf_txt)
-        prompt_Y3 = create_prompt_Y3(pdf_url=pdf_url,pdf_text=pdf_txt)
-        prompt_Y4 = create_prompt_Y4(pdf_url=pdf_url,pdf_text=pdf_txt)
-
-        # API response DeepSeek
+        # DeepSeek Analysis (chained: Y2 depends on Y1, Y3 depends on Y1+Y2)
         print(f"  Calling DeepSeek Y1-Y4...", end=" ", flush=True)
         ds_start = time.time()
-        DeepSeek_analysis_Y1 = connect_to_DeepSeek(api_key=deepseek_key,prompt=prompt_Y1)
-        DeepSeek_analysis_Y2 = connect_to_DeepSeek(api_key=deepseek_key,prompt=prompt_Y2)
-        DeepSeek_analysis_Y3 = connect_to_DeepSeek(api_key=deepseek_key,prompt=prompt_Y3)
-        DeepSeek_analysis_Y4 = connect_to_DeepSeek(api_key=deepseek_key,prompt=prompt_Y4)
+        prompt_Y1 = create_prompt_Y1(pdf_url, pdf_txt)
+        DeepSeek_analysis_Y1 = connect_to_DeepSeek(api_key=deepseek_key, prompt=prompt_Y1)
+        prompt_Y2 = create_prompt_Y2(pdf_url, pdf_txt, DeepSeek_analysis_Y1)
+        DeepSeek_analysis_Y2 = connect_to_DeepSeek(api_key=deepseek_key, prompt=prompt_Y2)
+        prompt_Y3 = create_prompt_Y3(pdf_url, pdf_txt, DeepSeek_analysis_Y1, DeepSeek_analysis_Y2)
+        DeepSeek_analysis_Y3 = connect_to_DeepSeek(api_key=deepseek_key, prompt=prompt_Y3)
+        prompt_Y4 = create_prompt_Y4(pdf_url, pdf_txt)
+        DeepSeek_analysis_Y4 = connect_to_DeepSeek(api_key=deepseek_key, prompt=prompt_Y4)
         ds_ok = all([DeepSeek_analysis_Y1, DeepSeek_analysis_Y2, DeepSeek_analysis_Y3, DeepSeek_analysis_Y4])
         print(f"{'OK' if ds_ok else 'FAILED'} ({time.time() - ds_start:.1f}s)")
 
-        # API response GPT
+        # GPT Analysis (chained)
         print(f"  Calling GPT Y1-Y4...", end=" ", flush=True)
         gpt_start = time.time()
-        ChatGPT_analysis_Y1 = connect_to_GPT(api_key=gpt_key,prompt=prompt_Y1)
-        ChatGPT_analysis_Y2 = connect_to_GPT(api_key=gpt_key,prompt=prompt_Y2)
-        ChatGPT_analysis_Y3 = connect_to_GPT(api_key=gpt_key,prompt=prompt_Y3)
-        ChatGPT_analysis_Y4 = connect_to_GPT(api_key=gpt_key,prompt=prompt_Y4)
-        gpt_ok = all([ChatGPT_analysis_Y1, ChatGPT_analysis_Y2, ChatGPT_analysis_Y3, ChatGPT_analysis_Y4])
+        prompt_Y1 = create_prompt_Y1(pdf_url, pdf_txt)
+        GPT_analysis_Y1 = connect_to_GPT(api_key=gpt_key, prompt=prompt_Y1)
+        prompt_Y2 = create_prompt_Y2(pdf_url, pdf_txt, GPT_analysis_Y1)
+        GPT_analysis_Y2 = connect_to_GPT(api_key=gpt_key, prompt=prompt_Y2)
+        prompt_Y3 = create_prompt_Y3(pdf_url, pdf_txt, GPT_analysis_Y1, GPT_analysis_Y2)
+        GPT_analysis_Y3 = connect_to_GPT(api_key=gpt_key, prompt=prompt_Y3)
+        prompt_Y4 = create_prompt_Y4(pdf_url, pdf_txt)
+        GPT_analysis_Y4 = connect_to_GPT(api_key=gpt_key, prompt=prompt_Y4)
+        gpt_ok = all([GPT_analysis_Y1, GPT_analysis_Y2, GPT_analysis_Y3, GPT_analysis_Y4])
         print(f"{'OK' if gpt_ok else 'FAILED'} ({time.time() - gpt_start:.1f}s)")
 
-        # API response Gemini
+        # Gemini Analysis (chained)
         print(f"  Calling Gemini Y1-Y4...", end=" ", flush=True)
         gem_start = time.time()
-        Gemini_analysis_Y1 = connect_to_Gemini(api_key=gemini_key,prompt=prompt_Y1)
-        Gemini_analysis_Y2 = connect_to_Gemini(api_key=gemini_key,prompt=prompt_Y2)
-        Gemini_analysis_Y3 = connect_to_Gemini(api_key=gemini_key,prompt=prompt_Y3)
-        Gemini_analysis_Y4 = connect_to_Gemini(api_key=gemini_key,prompt=prompt_Y4)
+        prompt_Y1 = create_prompt_Y1(pdf_url, pdf_txt)
+        Gemini_analysis_Y1 = connect_to_Gemini(api_key=gemini_key, prompt=prompt_Y1)
+        prompt_Y2 = create_prompt_Y2(pdf_url, pdf_txt, Gemini_analysis_Y1)
+        Gemini_analysis_Y2 = connect_to_Gemini(api_key=gemini_key, prompt=prompt_Y2)
+        prompt_Y3 = create_prompt_Y3(pdf_url, pdf_txt, Gemini_analysis_Y1, Gemini_analysis_Y2)
+        Gemini_analysis_Y3 = connect_to_Gemini(api_key=gemini_key, prompt=prompt_Y3)
+        prompt_Y4 = create_prompt_Y4(pdf_url, pdf_txt)
+        Gemini_analysis_Y4 = connect_to_Gemini(api_key=gemini_key, prompt=prompt_Y4)
         gem_ok = all([Gemini_analysis_Y1, Gemini_analysis_Y2, Gemini_analysis_Y3, Gemini_analysis_Y4])
         print(f"{'OK' if gem_ok else 'FAILED'} ({time.time() - gem_start:.1f}s)")
 
@@ -351,7 +361,7 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
         if DeepSeek_analysis_Y1 and DeepSeek_analysis_Y2 and DeepSeek_analysis_Y3 and DeepSeek_analysis_Y4:
             result_row_DeepSeek["ID"] = temp_uuid
             result_row_DeepSeek["LLM"] = "DeepSeek"
-            result_row_DeepSeek["Y1"] = DeepSeek_analysis_Y1.get("Y1"," ")
+            result_row_DeepSeek["Y1"] = DeepSeek_analysis_Y1.get("Y1", " ")
             result_row_DeepSeek["Y2"] = DeepSeek_analysis_Y2.get("Y2", " ")
             result_row_DeepSeek["Y3"] = DeepSeek_analysis_Y3.get("Y3", " ")
             result_row_DeepSeek["Y4"] = DeepSeek_analysis_Y4.get("Y4", " ")
@@ -363,14 +373,13 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
             result_row_DeepSeek["Y3"] = "API failed"
             result_row_DeepSeek["Y4"] = "API failed"
 
-
-        if ChatGPT_analysis_Y1 and ChatGPT_analysis_Y2 and ChatGPT_analysis_Y3 and ChatGPT_analysis_Y4:
+        if GPT_analysis_Y1 and GPT_analysis_Y2 and GPT_analysis_Y3 and GPT_analysis_Y4:
             result_row_GPT["ID"] = temp_uuid
             result_row_GPT["LLM"] = "GPT"
-            result_row_GPT["Y1"] = ChatGPT_analysis_Y1.get("Y1"," ")
-            result_row_GPT["Y2"] = ChatGPT_analysis_Y2.get("Y2"," ")
-            result_row_GPT["Y3"] = ChatGPT_analysis_Y3.get("Y3"," ")
-            result_row_GPT["Y4"] = ChatGPT_analysis_Y4.get("Y4"," ")
+            result_row_GPT["Y1"] = GPT_analysis_Y1.get("Y1", " ")
+            result_row_GPT["Y2"] = GPT_analysis_Y2.get("Y2", " ")
+            result_row_GPT["Y3"] = GPT_analysis_Y3.get("Y3", " ")
+            result_row_GPT["Y4"] = GPT_analysis_Y4.get("Y4", " ")
         else:
             result_row_GPT["ID"] = temp_uuid
             result_row_GPT["LLM"] = "GPT"
@@ -402,7 +411,9 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
 
     return pd.DataFrame(results)
 
+
 def main():
+    print("")
     load_dotenv()
 
     parser = argparse.ArgumentParser(description="part 2 of project")
@@ -496,4 +507,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# example command line: caffeinate -i python3 Pilot.py --input wayback_pdfs_results.csv --output wayback_pdfs_results_final.csv --pdf_url_column pdf_wayback_url --batch_size 3 --start_row 0
+# example command line: caffeinate -i python3 data_analysis.py --input PART1_COMBINED.csv --output PART2_COMBINED.CSV --pdf_url_column pdf_url --batch_size 5 --start_row 0

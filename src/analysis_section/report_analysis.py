@@ -15,7 +15,6 @@ from openai import OpenAI
 from google import genai
 from google.genai import types
 
-
 def load_csv(file_path):
     
     try:

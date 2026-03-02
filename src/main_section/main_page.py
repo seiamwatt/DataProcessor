@@ -31,12 +31,21 @@ version = os.getenv("version")
 
 console = Console()
 version = os.getenv("version")
-def welcome_panel():
+def welcome_panel() -> Panel:
     return Panel("",title="[red]Data Processor",subtitle=f"[blue]version: {version}",highlight=True)
     
 def choice_menu():
     choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()
     return choice
+
+def info_panel() -> Panel:
+    return Panel(f"Version:{version}",title="Info",highlight=True)
+
+def LLM_model_table() -> Table:
+    table = Table(title="LLM table model")
+    return Table
+    
+
 
 def LLM_token_table():
     table = Table(title = "LLM tokens rate")

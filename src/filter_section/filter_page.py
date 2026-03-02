@@ -130,16 +130,5 @@ def show():
         final_df = pd.concat(all_results,ignore_index=True)
         final_df.to_csv(output_path)
 
-
-
-
-
-    
-
 if __name__ == "__main__":
     show()
-
-
-
-
-

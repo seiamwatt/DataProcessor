@@ -29,6 +29,7 @@ import pandas as pd
 import sys
 import time
 from rich.progress import Progress
+import uuid
 
 import report_filter
 console = Console()
@@ -41,6 +42,22 @@ def resource_path(relative_path):
 
 load_dotenv(resource_path(".env"))
 
+# sqllite DB connect
+import sqlite3
+
+connector = sqlite3.connect("filter_log.db")
+cursor = connector.cursor()
+
+
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS filter_log (
+        ID TEXT,
+        START_ROW INTEGER,
+        END_ROW INTEGER,
+        TIME_ELAPSED REAL
+    )
+""")
+connector.commit()
 
 def filter_page_panel():
     return Panel("",title="[blue]Data Filter")
@@ -116,6 +133,7 @@ def show():
             batch_num = i // batch_size + 1
             console.print(f"[bold blue] Batch num: {batch_num}")
             batch = df_subset.iloc[i:i+batch_size]
+            time_start = time.time()
             batch_result = report_filter.batch_processing(df_batch=batch,api_key= api_key,pdf_url_column=col_name,extract_text=True)
             all_results.append(batch_result)
 
@@ -123,12 +141,19 @@ def show():
             progress.update(task1,advance=1)
      
         progress.stop()
-    
-    
+ 
     if all_results:
         console.print(processing_end_panel())
         final_df = pd.concat(all_results,ignore_index=True)
         final_df.to_csv(output_path)
+
+        # append to log db
+        id = str(uuid.uuid4())
+        time_elapsed = time.time() - time_start
+        data_to_log = [id,start_row,end_row,time_elapsed]
+        cursor.execute("INSERT INTO filter_log VALUES(?, ?, ?,?)", data_to_log)
+        connector.commit()
+        connector.close()
 
 if __name__ == "__main__":
     show()

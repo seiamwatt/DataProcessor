@@ -80,80 +80,89 @@ def processing_end_panel():
     return Panel("",title="[bold blue] End of processing")
 
 def show():
+    status = True
+
+
     load_dotenv(resource_path(".env"))
     console.print("Filter Data")
     console.print(filter_page_panel())
     console.print(args_table())
 
-    input_path = questionary.path("Input CSV file:").ask()
-    input_path = input_path.strip("'\"")
+    while(status):
+        input_path = questionary.path("Input CSV file:").ask()
+        input_path = input_path.strip("'\"")
 
-    output_path = questionary.path("Output CSV file:").ask()
-    batch_size = questionary.text("Batch Size").ask()
-    start_row = questionary.text("Start row").ask()
-    end_row = questionary.text("End row").ask()
-    col_name = questionary.text("Col name").ask()
+        output_path = questionary.path("Output CSV file:").ask()
+        batch_size = questionary.text("Batch Size").ask()
+        start_row = questionary.text("Start row").ask()
+        end_row = questionary.text("End row").ask()
+        col_name = questionary.text("Col name").ask()
 
-    output_path = os.path.join(os.path.dirname(input_path), output_path)
+        output_path = os.path.join(os.path.dirname(input_path), output_path)
 
-    if start_row is None:
-        start_row = 0
+        if start_row is None:
+            start_row = 0
+        
+        if end_row is None:
+            end_row = len(df)
+
+        
+        if batch_size is None:
+            batch_size = 5
+
+        if col_name is None:
+            col_name = "pdf_url"
+
+        start_row = int(start_row)
+        end_row = int(end_row)
+        batch_size = int(batch_size)
+
+
+        df = report_filter.load_csv(input_path)
+
+        api_key = os.getenv("DeepSeek_key")
+        if api_key is None:
+            console.print("[bold red]No API key")
+            return
+
+
+        df_subset = df.iloc[start_row:end_row]
+        all_results = []
+        total_batches = (len(df_subset) + batch_size - 1) // batch_size
+        console.print("[bold red]processing Data")
+        with Progress() as progress:
+            task1 = progress.add_task("[red]Filtering Data",total=total_batches)
+            for i in range(0,len(df_subset),batch_size):
+
+                batch_num = i // batch_size + 1
+                console.print(f"[bold blue] Batch num: {batch_num}")
+                batch = df_subset.iloc[i:i+batch_size]
+                time_start = time.time()
+                batch_result = report_filter.batch_processing(df_batch=batch,api_key= api_key,pdf_url_column=col_name,extract_text=True)
+                all_results.append(batch_result)
+
+                progress.update(task1,advance=1)
+        
+            progress.stop()
     
-    if end_row is None:
-        end_row = len(df)
+        if all_results:
+            console.print(processing_end_panel())
+            final_df = pd.concat(all_results,ignore_index=True)
+            final_df.to_csv(output_path)
 
-    
-    if batch_size is None:
-        batch_size = 5
-
-    if col_name is None:
-        col_name = "pdf_url"
-
-    start_row = int(start_row)
-    end_row = int(end_row)
-    batch_size = int(batch_size)
-
-
-    df = report_filter.load_csv(input_path)
-
-    api_key = os.getenv("DeepSeek_key")
-    if api_key is None:
-        console.print("[bold red]No API key")
-        return
-
-
-    df_subset = df.iloc[start_row:end_row]
-    all_results = []
-    total_batches = (len(df_subset) + batch_size - 1) // batch_size
-    console.print("[bold red]processing Data")
-    with Progress() as progress:
-        task1 = progress.add_task("[red]Filtering Data",total=total_batches)
-        for i in range(0,len(df_subset),batch_size):
-
-            batch_num = i // batch_size + 1
-            console.print(f"[bold blue] Batch num: {batch_num}")
-            batch = df_subset.iloc[i:i+batch_size]
-            time_start = time.time()
-            batch_result = report_filter.batch_processing(df_batch=batch,api_key= api_key,pdf_url_column=col_name,extract_text=True)
-            all_results.append(batch_result)
-
+            # append to log db
+            id = str(uuid.uuid4())
+            time_elapsed = time.time() - time_start
+            data_to_log = [id,start_row,end_row,time_elapsed]
+            cursor.execute("INSERT INTO filter_log VALUES(?, ?, ?,?)", data_to_log)
+            connector.commit()
             
-            progress.update(task1,advance=1)
-     
-        progress.stop()
- 
-    if all_results:
-        console.print(processing_end_panel())
-        final_df = pd.concat(all_results,ignore_index=True)
-        final_df.to_csv(output_path)
+            
+            status_update = questionary.path("Exit? [Y/N]").ask()
 
-        # append to log db
-        id = str(uuid.uuid4())
-        time_elapsed = time.time() - time_start
-        data_to_log = [id,start_row,end_row,time_elapsed]
-        cursor.execute("INSERT INTO filter_log VALUES(?, ?, ?,?)", data_to_log)
-        connector.commit()
-        connector.close()
+            if(status_update == "Y"):
+                status = False
+    connector.close()
 
 if __name__ == "__main__":
     show()

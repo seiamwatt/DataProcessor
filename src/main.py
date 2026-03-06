@@ -4,9 +4,10 @@ from filter_section import report_filter
 import time 
 import questionary
 from main_section import main_page
+from main_section import settings_page
 from filter_section import filter_page
-from analysis_section import analysis_page
 from filter_section import report_filter
+from analysis_section import analysis_page
 import subprocess
 import os
 
@@ -22,14 +23,13 @@ def main():
     main_page.show()
     choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","Settings"]).ask()
 
-    os.system("clear")
     if choice == "Part 1:Filter data":
+        os.system("clear")
         filter_page.show()
     elif choice == "Part 2:LLM analysis":
         analysis_page.show()
     elif choice == "Settings":
-        pass
+        settings_page.show()
    
-
 if __name__ == "__main__":
     main()

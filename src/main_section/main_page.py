@@ -26,7 +26,17 @@ from rich.padding import Padding
 import questionary
 from dotenv import load_dotenv
 import os
-load_dotenv()
+from main_section import main_util
+import sys
+
+def resource_path(relative_path):
+    """Get path for bundled files (works for both dev and PyInstaller)"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+
+load_dotenv(resource_path(".env"))
+
 version = os.getenv("version")
 
 console = Console()
@@ -40,12 +50,6 @@ def choice_menu():
 
 def info_panel() -> Panel:
     return Panel(f"Version:{version}",title="Info",highlight=True)
-
-def LLM_model_table() -> Table:
-    table = Table(title="LLM table model")
-    return Table
-    
-
 
 def LLM_token_table():
     table = Table(title = "LLM tokens rate")
@@ -61,7 +65,7 @@ def LLM_token_table():
 def show():
     console.print(welcome_panel())
     console.print(LLM_token_table())
-    # console.print(choice_menu())
+    
 
 if __name__ == "__main__":
     show()

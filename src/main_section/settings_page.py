@@ -26,7 +26,7 @@ from rich.padding import Padding
 import questionary
 from dotenv import load_dotenv
 import os
-import main_util
+from main_section import main_util
 import sys
 version = os.getenv("version")
 

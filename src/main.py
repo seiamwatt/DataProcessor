@@ -8,6 +8,7 @@ from main_section import settings_page
 from filter_section import filter_page
 from filter_section import report_filter
 from analysis_section import analysis_page
+from analysis_section import report_analysis
 import subprocess
 import os
 
@@ -17,7 +18,6 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 def choice_menu():
     choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()
     return choice
-
 
 def main():
     main_page.show()

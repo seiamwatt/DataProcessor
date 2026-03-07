@@ -130,17 +130,15 @@ def show():
         all_results = []
         total_batches = (len(df_subset) + batch_size - 1) // batch_size
         console.print("[bold red]processing Data")
+        time_start = time.time()
         with Progress() as progress:
             task1 = progress.add_task("[red]Filtering Data",total=total_batches)
             for i in range(0,len(df_subset),batch_size):
-
                 batch_num = i // batch_size + 1
                 console.print(f"[bold blue] Batch num: {batch_num}")
                 batch = df_subset.iloc[i:i+batch_size]
-                time_start = time.time()
                 batch_result = report_filter.batch_processing(df_batch=batch,api_key= api_key,pdf_url_column=col_name,extract_text=True)
                 all_results.append(batch_result)
-
                 progress.update(task1,advance=1)
         
             progress.stop()

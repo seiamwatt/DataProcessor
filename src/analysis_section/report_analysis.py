@@ -313,11 +313,15 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
         else:
             print(f"  PDF extracted: {len(pdf_txt)} chars, {elapsed:.1f}s")
 
+        # ALT VERSION: Y1 prompt for all
+        prompt_Y1 = create_prompt_Y1(pdf_url,pdf_txt)
+        Y1_all = connect_to_GPT(api_key=gpt_key,prompt= prompt_Y1)
+
         # DeepSeek Analysis (chained: Y2 depends on Y1, Y3 depends on Y1+Y2)
         print(f"  Calling DeepSeek Y1-Y4...", end=" ", flush=True)
         ds_start = time.time()
         prompt_Y1 = create_prompt_Y1(pdf_url, pdf_txt)
-        DeepSeek_analysis_Y1 = connect_to_DeepSeek(api_key=deepseek_key, prompt=prompt_Y1)
+        DeepSeek_analysis_Y1 = Y1_all
         prompt_Y2 = create_prompt_Y2(pdf_url, pdf_txt, DeepSeek_analysis_Y1)
         DeepSeek_analysis_Y2 = connect_to_DeepSeek(api_key=deepseek_key, prompt=prompt_Y2)
         prompt_Y3 = create_prompt_Y3(pdf_url, pdf_txt, DeepSeek_analysis_Y1, DeepSeek_analysis_Y2)
@@ -331,7 +335,7 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
         print(f"  Calling GPT Y1-Y4...", end=" ", flush=True)
         gpt_start = time.time()
         prompt_Y1 = create_prompt_Y1(pdf_url, pdf_txt)
-        GPT_analysis_Y1 = connect_to_GPT(api_key=gpt_key, prompt=prompt_Y1)
+        GPT_analysis_Y1 = Y1_all
         prompt_Y2 = create_prompt_Y2(pdf_url, pdf_txt, GPT_analysis_Y1)
         GPT_analysis_Y2 = connect_to_GPT(api_key=gpt_key, prompt=prompt_Y2)
         prompt_Y3 = create_prompt_Y3(pdf_url, pdf_txt, GPT_analysis_Y1, GPT_analysis_Y2)
@@ -345,7 +349,7 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
         print(f"  Calling Gemini Y1-Y4...", end=" ", flush=True)
         gem_start = time.time()
         prompt_Y1 = create_prompt_Y1(pdf_url, pdf_txt)
-        Gemini_analysis_Y1 = connect_to_Gemini(api_key=gemini_key, prompt=prompt_Y1)
+        Gemini_analysis_Y1 = Y1_all
         prompt_Y2 = create_prompt_Y2(pdf_url, pdf_txt, Gemini_analysis_Y1)
         Gemini_analysis_Y2 = connect_to_Gemini(api_key=gemini_key, prompt=prompt_Y2)
         prompt_Y3 = create_prompt_Y3(pdf_url, pdf_txt, Gemini_analysis_Y1, Gemini_analysis_Y2)

@@ -17,45 +17,52 @@ load_dotenv(resource_path(".env"))
 def DeepSeek_connect_test() -> bool:
 
     key = os.getenv("DeepSeek_key")
+    try:
+        client = OpenAI(api_key=key,base_url="https://api.deepseek.com")
 
-    client = OpenAI(api_key=key,base_url="https://api.deepseek.com")
+        response = client.chat.completions.create(
+        model="deepseek-chat",
+        messages=[
+            {"role": "system", "content": "check"},
+            {"role": "user", "content": "check"},
+        ],
+        stream=False)
+        if response:
+            return True
 
-    response = client.chat.completions.create(
-    model="deepseek-chat",
-    messages=[
-        {"role": "system", "content": "check"},
-        {"role": "user", "content": "check"},
-    ],
-    stream=False)
-    if response:
-        return True
-
-    return False
+        return False
+    except Exception as e:
+        return False
 
 def GTP_connect_test() -> bool:
-    key = os.getenv("GPT_key")
-    client = OpenAI(api_key=key)
+    try:
+        key = os.getenv("GPT_key")
+        client = OpenAI(api_key=key)
 
-    response = client.responses.create(
-    model="gpt-4.1",
-    input="test"
-    )
+        response = client.responses.create(
+        model="gpt-4.1",
+        input="test"
+        )
 
-    if response:
-        return True
+        if response:
+            return True
 
-    return False
+        return False
+    except Exception as e:
+        return False
 
 def Gemini_connect_test() -> bool:
-    key = os.getenv("Gemini_key")
-    client = genai.Client(api_key=key)
-    response = client.models.generate_content(
-    model="gemini-3-flash-preview",
-    contents="test",)
+    try:
+        key = os.getenv("Gemini_key")
+        client = genai.Client(api_key=key)
+        response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents="test",)
 
-    if response:
-        return True
-    
-    return False
-
+        if response:
+            return True
+        
+        return False
+    except Exception as e:
+        return False
 

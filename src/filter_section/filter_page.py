@@ -30,6 +30,7 @@ import sys
 import time
 from rich.progress import Progress
 import uuid
+from rich.columns import Columns
 
 import report_filter
 console = Console()
@@ -80,6 +81,16 @@ def args_table():
 def processing_end_panel():
     return Panel("",title="[bold blue] End of processing")
 
+def default_value_table() -> Table:
+    table = Table(title="[blue]Default Values",border_style="bright_cyan")
+    table.add_column("[red]Args",no_wrap=True)
+    table.add_column("[red]Default Value",no_wrap=True)
+
+    table.add_row("Start row", "0")
+    table.add_row("End row", "df len")
+    table.add_row("Col name","pdf_url")
+    return table
+
 def show():
     status = True
 
@@ -87,7 +98,12 @@ def show():
     load_dotenv(resource_path(".env"))
     console.print("Filter Data")
     console.print(filter_page_panel())
-    console.print(args_table())
+    console.print(Columns([args_table(),default_value_table()]))
+
+
+
+    # console.print(args_table())
+    # console.print(default_value_table())
 
     while(status):
         
@@ -106,9 +122,6 @@ def show():
         start_row = int(start_row)
         end_row = int(end_row)
         batch_size = int(batch_size)
-
-
-        
 
         api_key = os.getenv("DeepSeek_key")
         if api_key is None:

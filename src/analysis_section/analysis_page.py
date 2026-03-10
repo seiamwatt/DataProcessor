@@ -28,6 +28,7 @@ import os
 from analysis_section import report_analysis
 import sys
 import uuid
+from rich.columns import Columns
 
 # resource path
 def resource_path(relative_path):
@@ -73,6 +74,17 @@ def args_table() -> Table:
     return table
 
 
+def default_value_table() -> Table:
+    table = Table(title="[blue]Default Values",border_style="bright_cyan")
+    table.add_column("[red]Args",no_wrap=True)
+    table.add_column("[red]Default Value",no_wrap=True)
+
+    table.add_row("Start row", "0")
+    table.add_row("End row", "df len")
+    table.add_row("Col name","pdf_url")
+    return table
+
+
 def processing_end_panel() -> Panel:
     return Panel("",title="[bold blue] End of processing")
 
@@ -82,7 +94,9 @@ def show():
    status = True
    load_dotenv(resource_path(".env"))
    console.print(analysis_page_panel())
-   console.print(args_table())
+
+   console.print(Columns([args_table(),default_value_table()]))
+ 
 
    while status:
     input_path = questionary.path("Input CSV file:").ask()

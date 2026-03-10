@@ -66,6 +66,13 @@ def status_table() -> Table:
 
     return table
 
+def filter_overview_panel() -> Panel:
+    pass
+
+def analysis_overview_panel() -> Panel:
+    pass
+
+
 
 def show():
     console = Console()

@@ -649,7 +649,6 @@ def show_layout():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # MAIN
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 def main():
     console.clear()
     show_banner()
@@ -675,9 +674,7 @@ def main():
         ("Layout System", show_layout),
     ]
 
-    for i, (name, func) in enumerate(demos, 1):
-        func()
-        pause(0.2)
+
 
     # Finale
     console.print()
@@ -699,3 +696,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+if __name__ ==. "__main__:
+    console.print(debfwnfifdnsnqwopvne vjsps ajfejfnjrhnngnvhbf sgn vpsienghvnslgjr ghjs ghfls
+                  jfgjdnnsikgwnmgiren sofrogjdpr ;sgjdpeng;jkjfs;gf fdjg;nvg sep=
+                  
+                  jsj 
+                  sdjdw fkgbriffngs
+                  fgsjgfjwwkjgs
+                  fioensagidfnfdshg spr fiberignidnskjjgnbhslsnvgsjfvs 
+                  shfspsa dufsalasfhd siebsjdhfsb)

@@ -12,7 +12,8 @@ from analysis_section import report_analysis
 import subprocess
 import os
 
-console = Console()
+
+console = Console(color_system="truecolor")
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def choice_menu():

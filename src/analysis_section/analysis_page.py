@@ -37,6 +37,8 @@ def resource_path(relative_path):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
 load_dotenv(resource_path(".env"))
+os.environ["TERM"] = "xterm-256color"
+
 
 import sqlite3
 
@@ -85,32 +87,20 @@ def show():
    while status:
     input_path = questionary.path("Input CSV file:").ask()
     input_path = input_path.strip("'\"")
+    df = report_analysis.load_csv(input_path)
 
     output_path = questionary.path("Output CSV file:").ask()
     batch_size = questionary.text("Batch Size").ask()
-    start_row = questionary.text("Start row").ask()
-    end_row = questionary.text("End row").ask()
-    col_name = questionary.text("Col name").ask()
-
+    start_row = questionary.text("Start row",default=str(0)).ask()
+    end_row = questionary.text("End row",default=str(len(df))).ask()
+    col_name = questionary.text("Col name",default="pdf_url").ask()
     output_path = os.path.join(os.path.dirname(input_path), output_path)
-
-    if start_row is None:
-        start_row = 0
-
-    if end_row is None:
-        end_row = len(df)
-
-    if batch_size is None:
-        batch_size = 5
-
-    if col_name is None:
-        col_name = "pdf_url"
 
     start_row = int(start_row)
     end_row = int(end_row)
     batch_size = int(batch_size)
 
-    df = report_analysis.load_csv(input_path)
+   
 
     deep_key = os.getenv("DeepSeek_key")
     if deep_key is None:
@@ -144,9 +134,9 @@ def show():
             batch_result.to_csv(output_path, mode='a', header=(i == 0))
             progress.update(task1, advance=1)
 
-            id = str(uuid.uuid4())
-            
-
+           
+           
+        id = str(uuid.uuid4())
         progress.stop()
         time_elapsed = time.time() - time_start
         data_to_log = [id, start_row, end_row, time_elapsed]
@@ -155,7 +145,7 @@ def show():
         status_update = questionary.confirm("Exit? [Y/N]").ask()
 
         if status_update:
-            status = False
+            status = False 
 
     connector.close()
    

@@ -10,10 +10,10 @@ import time
 import os
 import ocrmypdf
 import tempfile
-
+from rich.console import Console
 import sys, os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
+console = Console()
 
 def load_csv(file_path):
 
@@ -174,8 +174,11 @@ def batch_processing(df_batch, api_key,pdf_url_column, extract_text=True):
         if classification:
             print(f"  Result: {classification}")
 
+            
+
             result_row = row.copy()
             result_row["is_annual_report"] = classification.get("is_annual_report", False)
+            console.print(f"[bold red]Classification {result_row['is_annual_report']}[/bold red]")
             result_row["confidence"] = classification.get("confidence", "unknown")
             result_row["classification_reason"] = classification.get("reason", "")
 

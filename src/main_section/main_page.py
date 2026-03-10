@@ -29,6 +29,7 @@ import os
 from main_section import main_util
 import sys
 
+os.environ["TERM"] = "xterm-256color"
 def resource_path(relative_path):
     """Get path for bundled files (works for both dev and PyInstaller)"""
     if hasattr(sys, '_MEIPASS'):
@@ -52,7 +53,7 @@ def info_panel() -> Panel:
     return Panel(f"Version:{version}",title="Info",highlight=True)
 
 def LLM_token_table():
-    table = Table(title = "LLM tokens rate")
+    table = Table(title = "LLM tokens rate",border_style="bright_cyan")
     table.add_column("[blue]LLM",no_wrap=True)
     table.add_column("[blue]Input (per 1M)",no_wrap=True)
     table.add_column("[blue]Output (per 1M)",no_wrap=True)

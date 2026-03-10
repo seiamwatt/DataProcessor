@@ -29,6 +29,7 @@ import os
 from main_section import main_util
 import sys
 version = os.getenv("version")
+os.environ["TERM"] = "xterm-256color"
 
 def status_table() -> Table:
 

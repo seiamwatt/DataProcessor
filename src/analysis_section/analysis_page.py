@@ -29,7 +29,7 @@ from analysis_section import report_analysis
 import sys
 import uuid
 from rich.columns import Columns
-
+console = Console()
 # resource path
 def resource_path(relative_path):
     """Get path for bundled files (works for both dev and PyInstaller)"""
@@ -89,8 +89,29 @@ def processing_end_panel() -> Panel:
     return Panel("",title="[bold blue] End of processing")
 
 
+def upload_to_s3(input_path,output_path):
+    console.print("[bold blue]Input exists:", os.path.exists(input_path))
+    console.print("[bold blue]Output exists:", os.path.exists(output_path))
+
+    s3 = boto3.client('s3',region_name = 'us-east-2')
+    
+    cdt_time = pytz.timezone("America/Chicago")
+    curr_time = datetime.now(cdt_time)
+    display_time = curr_time.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+    try:
+        s3.upload_file(input_path,'dataprocessor-input-bucket',f"input_{display_time}.csv")
+    except Exception as e:
+        console.print(f"[bold red]Error uploading: {type(e).__name__}: {e}")
+
+    try:
+        s3.upload_file(output_path,'dataprocessor-output-bucket',f"output_{display_time}.csv")
+    except Exception as e:
+        console.print()
+
+    console.print("[bold green]Upload Completed")
+
 def show():
-   console = Console()
    status = True
    load_dotenv(resource_path(".env"))
    console.print(analysis_page_panel())
@@ -99,69 +120,80 @@ def show():
  
 
    while status:
-    input_path = questionary.path("Input CSV file:").ask()
-    input_path = input_path.strip("'\"")
-    df = report_analysis.load_csv(input_path)
 
-    output_path = questionary.path("Output CSV file:").ask()
-    batch_size = questionary.text("Batch Size").ask()
-    start_row = questionary.text("Start row",default=str(0)).ask()
-    end_row = questionary.text("End row",default=str(len(df))).ask()
-    col_name = questionary.text("Col name",default="pdf_url").ask()
-    output_path = os.path.join(os.path.dirname(input_path), output_path)
 
-    start_row = int(start_row)
-    end_row = int(end_row)
-    batch_size = int(batch_size)
+        input_status = True
 
-   
+        while input_status:
+            try:
+                input_path = questionary.path("Input CSV file:").ask()
+                input_path = input_path.strip("'\"")
+                df = report_analysis.load_csv(input_path)
+                default_end_row = len(df)
 
-    deep_key = os.getenv("DeepSeek_key")
-    if deep_key is None:
-        console.print("[bold red]DeepSeek API key invalid")
-        return
+                output_path = questionary.path("Output CSV file:").ask()
+                batch_size = questionary.text("Batch Size").ask()
+                start_row = questionary.text("Start row",default=str(0)).ask()
+                end_row = questionary.text("End row",default=str(default_end_row)).ask()
+                col_name = questionary.text("Col name",default="pdf_url").ask()
+                output_path = os.path.join(os.path.dirname(input_path), output_path)
 
-    gpt_key = os.getenv("GPT_key")
-    if gpt_key is None:
-        console.print("[bold red]GPT API key invalid ")
-        return
+                start_row = int(start_row)
+                end_row = int(end_row)
+                batch_size = int(batch_size)
+                input_status = False
+            except Exception as e:
+                console.print("[bold red]Invalid input")
 
-    gemini_key = os.getenv("Gemini_key")
-    if gemini_key is None:
-        console.print("[bold red]Gemini API key invalid")
-        return
+    
 
-    df_subset = df.iloc[start_row:end_row]
-    total_batches = (len(df_subset) + batch_size - 1) // batch_size
+        deep_key = os.getenv("DeepSeek_key")
+        if deep_key is None:
+            console.print("[bold red]DeepSeek API key invalid")
+            return
 
-    console.print("[bold red]processing Data")
+        gpt_key = os.getenv("GPT_key")
+        if gpt_key is None:
+            console.print("[bold red]GPT API key invalid ")
+            return
 
-    with Progress() as progress:
-        time_start = time.time()
-        task1 = progress.add_task("[red]Analysing data", total=total_batches)
+        gemini_key = os.getenv("Gemini_key")
+        if gemini_key is None:
+            console.print("[bold red]Gemini API key invalid")
+            return
 
-        for i in range(0, len(df_subset), batch_size):
-            batch_num = i // batch_size + 1
-            console.print(f"[bold blue] Batch num: {batch_num}")
-            batch = df_subset.iloc[i:i + batch_size]
-            batch_result = report_analysis.batch_processing(batch, col_name, deep_key, gemini_key, gpt_key)
-            batch_result.to_csv(output_path, mode='a', header=(i == 0))
-            progress.update(task1, advance=1)
+        df_subset = df.iloc[start_row:end_row]
+        total_batches = (len(df_subset) + batch_size - 1) // batch_size
 
-           
-           
-        id = str(uuid.uuid4())
-        progress.stop()
-        time_elapsed = time.time() - time_start
-        data_to_log = [id, start_row, end_row, time_elapsed]
-        cursor.execute("INSERT INTO analysis_log VALUES(?, ?, ?, ?)", data_to_log)
-        connector.commit()
-        status_update = questionary.confirm("Exit? [Y/N]").ask()
+        console.print("[bold red]processing Data")
 
-        if status_update:
-            status = False 
+        with Progress() as progress:
+            time_start = time.time()
+            task1 = progress.add_task("[red]Analysing data", total=total_batches)
 
-    connector.close()
+            for i in range(0, len(df_subset), batch_size):
+                batch_num = i // batch_size + 1
+                console.print(f"[bold blue] Batch num: {batch_num}")
+                batch = df_subset.iloc[i:i + batch_size]
+                batch_result = report_analysis.batch_processing(batch, col_name, deep_key, gemini_key, gpt_key)
+                batch_result.to_csv(output_path, mode='a', header=(i == 0))
+                progress.update(task1, advance=1)
+
+            
+            
+            id = str(uuid.uuid4())
+            progress.stop()
+            upload_to_s3(input_path=input_path,output_path=output_path)
+            time_elapsed = time.time() - time_start
+            data_to_log = [id, start_row, end_row, time_elapsed]
+            cursor.execute("INSERT INTO analysis_log VALUES(?, ?, ?, ?)", data_to_log)
+            connector.commit()
+            status_update = questionary.confirm("Exit? [Y/N]").ask()
+
+            if status_update:
+                status = False 
+
+connector.close()
    
 if __name__ == "__main__":
     show()

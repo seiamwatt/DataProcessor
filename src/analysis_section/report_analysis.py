@@ -216,11 +216,15 @@ def connect_to_DeepSeek(api_key,prompt,chat_model=None,max_tries=None):
             return format_api_output(content)
      
         except Exception as e:
-            if(attempt < max_tries):
-                time.sleep(2 ** attempt)
-            else:
-                print("all tries completed")
-                return None
+            time.sleep(1)
+            print("all tries completed")
+            return None
+            
+            # if(attempt < max_tries):
+            #     time.sleep(2 ** attempt)
+            # else:
+            #     print("all tries completed")
+            #     return None
 
 def connect_to_GPT(api_key,prompt,chat_model=None,max_tries=None):
 

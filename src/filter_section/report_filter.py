@@ -158,8 +158,6 @@ def batch_processing(df_batch, api_key,pdf_url_column, extract_text=True):
         # pdf_url = row["pdf_url"]
         pdf_url = row[pdf_url_column]
 
-        
-
         # Extract PDF text if enabled
         pdf_text = None
         if extract_text:

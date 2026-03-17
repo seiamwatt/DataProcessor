@@ -229,7 +229,7 @@ def connect_to_DeepSeek(api_key,prompt,chat_model=None,max_tries=None):
 def connect_to_GPT(api_key,prompt,chat_model=None,max_tries=None):
 
     if chat_model is None:
-        chat_model = "gpt-4.1"
+        chat_model = "gpt-5.1"
 
     
     if max_tries is None:
@@ -242,7 +242,7 @@ def connect_to_GPT(api_key,prompt,chat_model=None,max_tries=None):
             response = client.chat.completions.create(
                 model=chat_model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=3000,
+                max_completion_tokens=3000,
                 temperature=0,
             )
 

@@ -42,8 +42,23 @@ version = os.getenv("version")
 
 console = Console()
 version = os.getenv("version")
+
 def welcome_panel() -> Panel:
-    return Panel("",title="[red]Data Processor",subtitle=f"[blue]version: {version}",highlight=True)
+    art = """[red]
+ ████   █████  ██████  █████ 
+ ██  ██ ██  ██   ██   ██  ██ 
+ ██  ██ █████    ██   █████  
+ ████   ██  ██   ██   ██  ██ 
+[blue]
+ ████  ████   ████   ████  ████  █████  █████  ████  ████ 
+ ██  █ ██  █ ██  ██ ██    ██    ██     ██     ██  ██ ██  █
+ ████  ████  ██  ██ ██    ████   ███    ███  ██  ██ ████ 
+ ██    ██  █  ████   ████  ████ █████  █████  ████  ██  █
+"""
+    return Panel(art, subtitle=f"[blue]version: {version}", highlight=True)
+
+# def welcome_panel() -> Panel:
+#     return Panel("",title="[red]Data Processor",subtitle=f"[blue]version: {version}",highlight=True)
     
 def choice_menu():
     choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()

@@ -34,3 +34,7 @@ def main():
    
 if __name__ == "__main__":
     main()
+
+
+
+# pyinstaller --onefile --add-data ".env:." src/main.py

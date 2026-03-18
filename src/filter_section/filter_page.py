@@ -61,8 +61,15 @@ cursor.execute("""
 """)
 connector.commit()
 
-def filter_page_panel():
-    return Panel("", title="[blue]Data Filter")
+def filter_section_panel() -> Panel:
+    art = """[red]
+ ████  █ █   ██████ █████  ████  [blue] ████  █████  ████  ██████ █  ████  ██  ██
+[red] ██    █ ██    ██   ██     ██  █ [blue] ██    ██     ██      ██   █ ██  ██ ███ ██
+[red] ████  █ ██    ██   ████   ████  [blue]  ███  ████   ██      ██   █ ██  ██ ██ ███
+[red] ██    █ █████ ██   █████  ██  █ [blue] ████  █████  ████    ██   █  ████  ██  ██
+"""
+    return Panel(art, highlight=True)
+
 
 def args_table():
     table = Table(title="[blue]Argruments Needed", border_style="bright_cyan")
@@ -118,7 +125,7 @@ def show():
 
     load_dotenv(resource_path(".env"))
     console.print("Filter Data")
-    console.print(filter_page_panel())
+    console.print(filter_section_panel())
     console.print(Columns([args_table(), default_value_table()]))
 
     while(status):

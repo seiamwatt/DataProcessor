@@ -58,9 +58,17 @@ cursor.execute("""
 """)
 connector.commit()
 
-def analysis_page_panel() -> Panel:
-    return Panel("",title="[blue]Analysis Page")
+# def analysis_page_panel() -> Panel:
+#     return Panel("",title="[blue]Analysis Page")
 
+def analysis_section_panel() -> Panel:
+    art = """[red]
+  ████  ██  ██  ████  ██    ██  ██ ████  █ ████  [blue] ████  █████  ████  ██████ █  ████  ██  ██
+[red] ██  ██ ███ ██ ██  ██ ██    ██  ██ ██    █ ██    [blue] ██    ██     ██      ██   █ ██  ██ ███ ██
+[red] █████  ██ ███ █████  ██     ████   ███  █  ███  [blue]  ███  ████   ██      ██   █ ██  ██ ██ ███
+[red] ██  ██ ██  ██ ██  ██ █████   ██   ████  █ ████  [blue] ████  █████  ████    ██   █  ████  ██  ██
+"""
+    return Panel(art, highlight=True)
 def args_table() -> Table:
     table = Table(title = "[blue]Argruments Needed",border_style="bright_cyan")
     table.add_column("[red]Args",no_wrap=True)
@@ -116,7 +124,7 @@ def upload_to_s3(input_path,output_path):
 def show():
    status = True
    load_dotenv(resource_path(".env"))
-   console.print(analysis_page_panel())
+   console.print(analysis_section_panel())
 
    console.print(Columns([args_table(),default_value_table()]))
  

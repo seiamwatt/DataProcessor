@@ -51,6 +51,7 @@ def extract_pdf_text(pdf_url, max_pages=15):
 
         response = requests.get(pdf_url, timeout=30)
         response.raise_for_status()
+        time.sleep(30)
 
         pdf_file = BytesIO(response.content)
         pdf_reader = PyPDF2.PdfReader(pdf_file)
@@ -78,7 +79,7 @@ def extract_pdf_text(pdf_url, max_pages=15):
 
 
 def create_prompt(pdf_url, pdf_text=None):
-    """Create prompt for DeepSeek to identify annual reports"""
+    """Create prompt for DeepSeek to identify annual reports and their year"""
 
     if pdf_text:
         prompt = f"""Analyze the following document and determine if it is an ANNUAL REPORT.
@@ -88,13 +89,23 @@ An annual report typically:
 - Includes financial statements, operations summary, achievements, and future outlook
 - Is NOT just a Form 990 (tax filing), financial statement only, or other specific financial documents
 
+Also identify the YEAR the annual report covers. This is the fiscal or calendar year the report is about (e.g. "2023 Annual Report" covers year 2023). Look for clues such as:
+- The title (e.g. "Annual Report 2022")
+- The fiscal year period mentioned (e.g. "For the year ended December 31, 2023")
+- Date ranges in the financial statements
+- If the report covers a fiscal year like "July 2022 - June 2023", use the ending year (2023)
+
 PDF URL: {pdf_url}
 
 Document text (first few pages):
 {pdf_text}
 
 Respond with ONLY a JSON object in this exact format:
-{{"is_annual_report": true/false, "confidence": "high/medium/low", "reason": "brief explanation"}}"""
+{{"is_annual_report": true/false, "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}}
+
+For the "year" field:
+- Use a 4-digit integer (e.g. 2023) if you can determine the year
+- Use null if you cannot determine the year or if it is not an annual report"""
     else:
         prompt = f"""Based on the PDF URL, determine if this document is likely an ANNUAL REPORT.
 
@@ -103,10 +114,16 @@ An annual report typically:
 - Includes financial statements, operations summary, achievements, and future outlook
 - Is NOT just a Form 990 (tax filing), financial statement only, or other specific financial documents
 
+Also identify the YEAR the annual report covers based on any clues in the URL (e.g. "2022-annual-report.pdf" suggests year 2022).
+
 PDF URL: {pdf_url}
 
 Respond with ONLY a JSON object in this exact format:
-{{"is_annual_report": true/false, "confidence": "high/medium/low", "reason": "brief explanation"}}"""
+{{"is_annual_report": true/false, "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}}
+
+For the "year" field:
+- Use a 4-digit integer (e.g. 2023) if you can determine the year of the report
+- Use null if you cannot determine the year or if it is not an annual report"""
 
     return prompt
 
@@ -179,6 +196,10 @@ def batch_processing(df_batch, api_key,pdf_url_column, extract_text=True):
             console.print(f"[bold red]Classification {result_row['is_annual_report']}[/bold red]")
             result_row["confidence"] = classification.get("confidence", "unknown")
             result_row["classification_reason"] = classification.get("reason", "")
+
+            detected_year = classification.get("year",None)
+            if detected_year is not None:
+                result_row["year"] = detected_year
 
             results.append(result_row)
         else:

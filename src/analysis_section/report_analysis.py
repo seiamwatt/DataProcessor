@@ -307,6 +307,9 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
 
         pdf_url = row[pdf_url_column]
 
+        if not isinstance(pdf_url,str) or not pdf_url:
+            continue
+
         print(f"  Downloading PDF: {pdf_url[:100]}...")
         start_time = time.time()
         pdf_txt = extract_pdf_text(pdf_url=pdf_url)

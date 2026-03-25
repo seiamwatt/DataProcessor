@@ -190,10 +190,9 @@ def batch_processing(df_batch, api_key,pdf_url_column, extract_text=True):
             print(f"  Result: {classification}")
 
             
-
             result_row = row.copy()
             result_row["is_annual_report"] = classification.get("is_annual_report", False)
-            console.print(f"[bold red]Classification {result_row['is_annual_report']}[/bold red]")
+            # console.print(f"[bold red]Classification {result_row['is_annual_report']}[/bold red]")
             result_row["confidence"] = classification.get("confidence", "unknown")
             result_row["classification_reason"] = classification.get("reason", "")
 

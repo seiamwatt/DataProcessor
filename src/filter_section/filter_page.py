@@ -47,19 +47,6 @@ def resource_path(relative_path):
 
 load_dotenv(resource_path(".env"))
 
-import sqlite3
-connector = sqlite3.connect("filter_log.db")
-cursor = connector.cursor()
-
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS filter_log (
-        ID TEXT,
-        START_ROW INTEGER,
-        END_ROW INTEGER,
-        TIME_ELAPSED REAL
-    )
-""")
-connector.commit()
 
 def filter_section_panel() -> Panel:
     art = """[red]
@@ -177,10 +164,7 @@ def show():
             progress.stop()
             time_elapsed = time.time() - time_start
             data_to_log = [id, start_row, end_row, time_elapsed]
-            cursor.execute("INSERT INTO filter_log VALUES(?, ?, ?, ?)", data_to_log)
-            connector.commit()
-            
-
+        
         # S3 upload (outside Progress block)
         upload_to_s3(input_path, output_path)
         status_update = questionary.confirm("Exit? [Y/N]").ask()
@@ -188,7 +172,7 @@ def show():
         if status_update:
             status = False
 
-    connector.close()
+   
 
 if __name__ == "__main__":
     show()

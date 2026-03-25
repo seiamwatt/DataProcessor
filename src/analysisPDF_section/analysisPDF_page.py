@@ -68,6 +68,7 @@ def args_table() -> Table:
     table.add_row("input path", "input directory containing PDFs", "True")
     table.add_row("output name", "output CSV filename", "True")
     table.add_row("batch size", "num rows to process per batch", "False")
+    table.add_row("start at", "PDF # to start processing from (1-based)", "False")
     return table
 
 
@@ -79,6 +80,7 @@ def default_value_table() -> Table:
     table.add_row("Start", "Top pdf in directory")
     table.add_row("End", "All pdf in directory")
     table.add_row("batch size", "3")
+    table.add_row("start at", "1 (first PDF)")
     return table
 
 
@@ -130,10 +132,35 @@ def show():
                     return
 
                 batch_size = int(batch_input)
+
+                # --- Start-at prompt ---
+                # Collect PDFs early so we can show the total count
+                all_pdf_files = sorted(
+                    [f for f in os.listdir(input_path) if f.endswith(".pdf")]
+                )
+                num_total = len(all_pdf_files)
+
+                if num_total == 0:
+                    console.print("[bold red]No PDF files found in the directory")
+                    continue
+
+                start_input = questionary.text(
+                    f"Start at PDF # (1–{num_total})", default="1"
+                ).ask()
+                if start_input is None:
+                    return
+
+                start_at = int(start_input)
+                if start_at < 1 or start_at > num_total:
+                    console.print(
+                        f"[bold red]Start must be between 1 and {num_total}"
+                    )
+                    continue
+
                 input_status = False
 
             except ValueError:
-                console.print("[bold red]Batch size must be a number")
+                console.print("[bold red]Batch size and start-at must be numbers")
             except Exception as e:
                 console.print(f"[bold red]Invalid input: {e}")
 
@@ -152,17 +179,19 @@ def show():
             console.print("[bold red]Gemini API key invalid")
             return
 
-        # Collect PDF files
-        pdf_files = [f for f in os.listdir(input_path) if f.endswith(".pdf")]
+        # Slice the list from the chosen start position (1-based → 0-based)
+        pdf_files = all_pdf_files[start_at - 1 :]
         num_pdfs = len(pdf_files)
 
-        if num_pdfs == 0:
-            console.print("[bold red]No PDF files found in the directory")
-            continue
+        console.print(
+            f"[bold green]Found {num_total} PDFs total — "
+            f"starting from #{start_at} ({num_pdfs} to process) — "
+            f"output will be saved to: {output_path}"
+        )
 
-        console.print(f"[bold green]Found {num_pdfs} PDFs — output will be saved to: {output_path}")
-
-        first_write = True
+        # If resuming mid-way, append instead of overwriting
+        first_write = start_at == 1
+        pdf_processed_count = 0
 
         with Progress() as progress:
             time_start = time.time()
@@ -190,6 +219,9 @@ def show():
                     )
 
                 progress.update(task1, advance=1)
+                pdf_processed_count += 1
+                console.print("[bold red] PDF Processed")
+                console.print(f"[bold red]count:{pdf_processed_count}")
 
             elapsed = time.time() - time_start
             console.print(f"[bold green]Done in {elapsed:.1f}s — saved to {output_path}")
@@ -203,3 +235,5 @@ def show():
 
 if __name__ == "__main__":
     show()
+
+    

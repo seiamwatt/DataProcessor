@@ -43,21 +43,6 @@ load_dotenv(resource_path(".env"))
 os.environ["TERM"] = "xterm-256color"
 
 
-import sqlite3
-
-connector = sqlite3.connect("analysis_log.db")
-cursor = connector.cursor()
-
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS analysis_log (
-        ID TEXT,
-        START_ROW INTEGER,
-        END_ROW INTEGER,
-        TIME_ELAPSED REAL
-    )
-""")
-connector.commit()
-
 # def analysis_page_panel() -> Panel:
 #     return Panel("",title="[blue]Analysis Page")
 
@@ -196,14 +181,12 @@ def show():
             upload_to_s3(input_path=input_path,output_path=output_path)
             time_elapsed = time.time() - time_start
             data_to_log = [id, start_row, end_row, time_elapsed]
-            cursor.execute("INSERT INTO analysis_log VALUES(?, ?, ?, ?)", data_to_log)
-            connector.commit()
             status_update = questionary.confirm("Exit? [Y/N]").ask()
 
             if status_update:
                 status = False 
 
-connector.close()
+
    
 if __name__ == "__main__":
     show()

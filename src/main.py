@@ -15,7 +15,8 @@ from analysis_section import analysis_page
 from analysis_section import report_analysis
 from analysisPDF_section import analysisPDF_page
 from analysisPDF_section import report_analysis_pdfs
-
+from analysis_v2_section import analysis_v2_page
+from analysis_v2_section import analysis_v2
 # SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
@@ -30,15 +31,17 @@ def choice_menu():
 
 def main():
     main_page.show()
-    choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis(PDF url)","Part 2:LLM analysis(raw PDF)","Settings"]).ask()
+    choice = questionary.select("Select terminal",choices=["Filter Data","LLM Analysis - PDF URL","LLM Analysis - Raw PDF","LLM Analysis V2","Settings"]).ask()
 
-    if choice == "Part 1:Filter data":
+    if choice == "Filter Data":
         os.system("clear")
         filter_page.show()
-    elif choice == "Part 2:LLM analysis(PDF url)":
+    elif choice == "LLM Analysis - PDF URL":
         analysis_page.show()
-    elif choice == "Part 2:LLM analysis(raw PDF)":
+    elif choice == "LLM Analysis - Raw PDF":
         analysisPDF_page.show()
+    elif choice == "LLM Analysis V2":
+        analysis_v2_page.show()
     elif choice == "Settings":
         settings_page.show()
    

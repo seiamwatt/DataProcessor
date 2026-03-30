@@ -16,9 +16,13 @@ from analysis_section import report_analysis
 from analysisPDF_section import analysisPDF_page
 from analysisPDF_section import report_analysis_pdfs
 
+# SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
 script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# ---------------------------------------------------------------------------------
+# MAIN UI -------------------------------------------------------------------------
 
 def choice_menu():
     choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()
@@ -26,14 +30,14 @@ def choice_menu():
 
 def main():
     main_page.show()
-    choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","Part 2:(PDF)","Settings"]).ask()
+    choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis(PDF url)","Part 2:LLM analysis(raw PDF)","Settings"]).ask()
 
     if choice == "Part 1:Filter data":
         os.system("clear")
         filter_page.show()
-    elif choice == "Part 2:LLM analysis":
+    elif choice == "Part 2:LLM analysis(PDF url)":
         analysis_page.show()
-    elif choice == "Part 2:(PDF)":
+    elif choice == "Part 2:LLM analysis(raw PDF)":
         analysisPDF_page.show()
     elif choice == "Settings":
         settings_page.show()
@@ -41,7 +45,7 @@ def main():
 if __name__ == "__main__":
     main()
     
-
+# ---------------------------------------------------------------------------------
 
 
 # pyinstaller --onefile --add-data ".env:." src/main.py

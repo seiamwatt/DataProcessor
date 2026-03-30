@@ -29,6 +29,7 @@ import os
 from main_section import main_util
 import sys
 
+# SETUP ---------------------------------------------------------------------------
 os.environ["TERM"] = "xterm-256color"
 def resource_path(relative_path):
     """Get path for bundled files (works for both dev and PyInstaller)"""
@@ -41,8 +42,8 @@ load_dotenv(resource_path(".env"))
 version = os.getenv("version")
 
 console = Console()
-version = os.getenv("version")
-
+# ---------------------------------------------------------------------------------
+# UI ---------------------------------------------------------------------------
 def welcome_panel() -> Panel:
     art = """[red]
  ████   █████  ██████  █████ 
@@ -56,9 +57,6 @@ def welcome_panel() -> Panel:
  ██    ██  █  ████   ████  ████ █████  █████  ████  ██  █
 """
     return Panel(art, subtitle=f"[blue]version: {version}", highlight=True)
-
-# def welcome_panel() -> Panel:
-#     return Panel("",title="[red]Data Processor",subtitle=f"[blue]version: {version}",highlight=True)
     
 def choice_menu():
     choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()
@@ -77,6 +75,7 @@ def LLM_token_table():
     table.add_row("GPT 4.1 ","3 USD","0.75 USD")
     table.add_row("Gemini","1.25 USD","12 USD")
     return table
+# ---------------------------------------------------------------------------------
 
 def show():
     console.print(welcome_panel())

@@ -32,6 +32,9 @@ from rich.columns import Columns
 import boto3
 import pytz
 console = Console()
+
+
+# SETUP ---------------------------------------------------------------------------
 # resource path
 def resource_path(relative_path):
     """Get path for bundled files (works for both dev and PyInstaller)"""
@@ -41,6 +44,7 @@ def resource_path(relative_path):
 
 load_dotenv(resource_path(".env"))
 os.environ["TERM"] = "xterm-256color"
+# ---------------------------------------------------------------------------------
 
 
 # def analysis_page_panel() -> Panel:

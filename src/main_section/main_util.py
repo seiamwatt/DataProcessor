@@ -4,7 +4,7 @@ from dotenv import load_dotenv,find_dotenv
 from google import genai
 import sys
 # check connections
-
+# SETUP ---------------------------------------------------------------------------
 def resource_path(relative_path):
     """Get path for bundled files (works for both dev and PyInstaller)"""
     if hasattr(sys, '_MEIPASS'):
@@ -12,7 +12,7 @@ def resource_path(relative_path):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
 load_dotenv(resource_path(".env"))
-
+# ---------------------------------------------------------------------------------
 
 def DeepSeek_connect_test() -> bool:
 

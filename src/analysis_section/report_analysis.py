@@ -15,6 +15,8 @@ from openai import OpenAI
 from google import genai
 from google.genai import types
 
+
+# PDF parsing ---------------------------------------------------------------------------------------------------------------
 def load_csv(file_path):
     
     try:
@@ -80,10 +82,9 @@ def extract_pdf_text(pdf_url,max_pages=None):
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+# --------------------------------------------------------------------------------------------------------------------------------------------
     
-def format_api_output(input):
-    cleaned = input.strip().strip("```json").strip("```").strip()
-    return json.loads(cleaned)
+# Prompt --------------------------------------------------------------------------------------------------------------------------
     
 def create_prompt_Y1(pdf_url, pdf_text):
     return f"""You are an expert political and policy analyst. Analyze the following report and answer the question precisely in the specified format. Do not add extra commentary beyond what is requested.
@@ -181,6 +182,11 @@ Respond ONLY with valid JSON:
   "Y4": <integer 1-5>
 }}"""
 
+
+# API CALLS ------------------------------------------------------------------------------------------------------------------
+def format_api_output(input):
+    cleaned = input.strip().strip("```json").strip("```").strip()
+    return json.loads(cleaned)
 
 def connect_to_DeepSeek(api_key,prompt,chat_model=None,max_tries=None):
 
@@ -291,7 +297,10 @@ def connect_to_Gemini(api_key,prompt,chat_model=None,max_tries=None):
             else:
                 print("all tries completed")
                 return None
-
+            
+# --------------------------------------------------------------------------------------------------------------------------------------------
+    
+#Batch Processing --------------------------------------------------------------------------------------------
 def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key, batch_num=0, total_rows=0, rows_done=0):
 
     results = []
@@ -420,6 +429,7 @@ def batch_processing(df_batch, pdf_url_column, deepseek_key, gemini_key, gpt_key
         print(f"  Row {current_total}/{total_rows} complete. DeepSeek={('OK' if ds_ok else 'FAIL')} | GPT={('OK' if gpt_ok else 'FAIL')} | Gemini={('OK' if gem_ok else 'FAIL')}")
 
     return pd.DataFrame(results)
+# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def main():
     pass

@@ -29,43 +29,26 @@ import os
 from main_section import main_util
 import sys
 from rich.columns import Columns
+# SETUP ---------------------------------------------------------------------------
 version = os.getenv("version")
-os.environ["TERM"] = "xterm-256color"
+deep_key = os.getenv("DeepSeek_key")
+gemini_key = os.getenv("Gemini_key")
+gpt_key = os.getenv("GPT_key")
+# ---------------------------------------------------------------------------------
 
-def status_table() -> Table:
+def key_table() -> Table:
 
-    deep_status = main_util.DeepSeek_connect_test()
-    gpt_status = main_util.GTP_connect_test()
-    gemini_status = main_util.Gemini_connect_test()
-
-    online = "[bold green]Online"
-    offline = "[bold red]Offline"
-
-    if deep_status:
-        deep_show = online
-    else:
-        deep_show = offline
-
-    if gpt_status:
-        gpt_show = online
-    else:
-        gpt_show = offline
-
-    if gemini_status:
-        gemini_show = online
-    else:
-        gemini_show = offline
-
-    table = Table(title="[bold red]LLM status")
+    table = Table(title = "")
 
     table.add_column("LLM")
-    table.add_column("Status")
-
-    table.add_row("DeepSeek",deep_show)
-    table.add_row("GPT",gpt_show)
-    table.add_row("Gemini",gemini_show)
-
+    table.add_column("Value")
+    table.add_row("DeepSeek",deep_key)
+    table.add_row("GPT",gpt_key)
+    table.add_row("Gemini",gemini_key)
     return table
+
+def key_panel() -> Panel:
+    return Panel(key_table(),title = "[bold red]Keys",title_align="left",highlight=True)
 
 def status_panel() -> Panel:
     deep_status = main_util.DeepSeek_connect_test()
@@ -115,7 +98,8 @@ def analysis_overview_panel() -> Panel:
         "5. Results are saved progressively to an output CSV in batches"
     )
     return Panel(overview, title="[bold green]Analysis Process Overview", title_align="left", highlight=True)
-  
+
+
 
 def show():
     console = Console()
@@ -135,6 +119,7 @@ def show():
     status = Table.grid(padding=(1, 0))
     status.add_column()
     status.add_row(status_panel())
+    status.add_row(key_panel())
 
     console.print(Columns([overviews, status], padding=(0, 2)))
 

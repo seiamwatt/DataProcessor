@@ -269,7 +269,7 @@ def connect_to_GPT(api_key,prompt,chat_model=None,max_tries=None):
 def connect_to_Gemini(api_key,prompt,chat_model=None,max_tries=None):
 
     if chat_model is None:
-        chat_model = "gemini-3-flash-preview"
+        chat_model = "gemini-3.1-pro-preview"
         
     if max_tries is None:
         max_tries = 8

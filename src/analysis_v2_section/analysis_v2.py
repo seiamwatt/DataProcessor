@@ -15,6 +15,7 @@ from openai import OpenAI
 from google import genai
 from google.genai import types
 from rich.console import Console
+import re 
 # SETUP -------------------------------------------------------------------------------------------------------
 console = Console()
 
@@ -86,9 +87,65 @@ def extract_pdf_text(pdf_url,max_pages=None):
 
 # API CALLS ------------------------------------------------------------------------------------------------------------------------------------
     
+def _fix_json_strings(s):
+    """Escape raw newlines/tabs inside JSON string values."""
+    result = []
+    in_string = False
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if not in_string:
+            result.append(ch)
+            if ch == '"':
+                in_string = True
+        else:
+            if ch == '\\':
+                result.append(ch)
+                if i + 1 < len(s):
+                    i += 1
+                    result.append(s[i])
+            elif ch == '"':
+                result.append(ch)
+                in_string = False
+            elif ch == '\n':
+                result.append('\\n')
+            elif ch == '\r':
+                result.append('\\r')
+            elif ch == '\t':
+                result.append('\\t')
+            else:
+                result.append(ch)
+        i += 1
+    return ''.join(result)
+
 def format_api_output(input):
-    cleaned = input.strip().strip("```json").strip("```").strip()
-    return json.loads(cleaned)
+    if not input or not input.strip():
+        return None
+
+    cleaned = input.strip()
+    cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+    cleaned = re.sub(r'\s*```$', '', cleaned)
+    cleaned = cleaned.strip()
+
+    candidates = [cleaned]
+    no_trailing = re.sub(r',\s*([}\]])', r'\1', cleaned)
+    candidates.append(no_trailing)
+    candidates.append(_fix_json_strings(cleaned))
+    candidates.append(_fix_json_strings(no_trailing))
+
+    match = re.search(r'\{[\s\S]*\}', cleaned)
+    if match:
+        extracted = match.group()
+        candidates.append(extracted)
+        candidates.append(_fix_json_strings(re.sub(r',\s*([}\]])', r'\1', extracted)))
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    return None
 
 def connect_to_DeepSeek(api_key,prompt,chat_model=None,max_tries=None):
 
@@ -111,7 +168,7 @@ def connect_to_DeepSeek(api_key,prompt,chat_model=None,max_tries=None):
             payload = {
                 "model": chat_model,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 3000,
+                "max_tokens": 5000,
                 "temperature": 0,
             }
 
@@ -170,7 +227,7 @@ def connect_to_GPT(api_key,prompt,chat_model=None,max_tries=None):
 def connect_to_Gemini(api_key,prompt,chat_model=None,max_tries=None):
 
     if chat_model is None:
-        chat_model = "gemini-3-flash-preview"
+        chat_model = "gemini-3.1-pro-preview"
         
     if max_tries is None:
         max_tries = 8
@@ -183,7 +240,7 @@ def connect_to_Gemini(api_key,prompt,chat_model=None,max_tries=None):
                 contents = prompt,
                 config = types.GenerateContentConfig(
                     thinking_config=types.ThinkingConfig(thinking_level="high",include_thoughts=False),
-                    max_output_tokens=3000
+                    max_output_tokens=5000
                 ) 
             )  
 
@@ -405,9 +462,9 @@ def batch_processing(df_batch,pdf_url_column,deepseek_key,gemini_key,gpt_key,bat
         LLM_status = all([deepseek_output,gemini_output,gpt_output])
 
         if LLM_status:
-            console.print("[bold red]All LLM responded")
+            print("All LLM responded")
         else:
-            console.print("[bold red]LLM response fail")
+            print("LLM response fail")
 
         
         JSON_FIELDS = [
@@ -433,10 +490,12 @@ def batch_processing(df_batch,pdf_url_column,deepseek_key,gemini_key,gpt_key,bat
         }
 
         for prefix, output in llm_outputs.items():
-            for field in JSON_FIELDS:
-                result_row[f"{prefix}_{field}"] = output.get(field, "")
+            if output:
+                for field in JSON_FIELDS:
+                    result_row[f"{prefix}_{field}"] = output.get(field, "")
             else:
-                 result_row[f"{prefix}_{field}"] = "Parsing Error"
+                 for field in JSON_FIELDS:
+                    result_row[f"{prefix}_{field}"] = "Parsing Error"
         
         results.append(result_row)
 

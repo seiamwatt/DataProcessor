@@ -1,92 +1,89 @@
 import uuid
 import json
-import argparse
 import requests
 import pandas as pd
 from dotenv import load_dotenv
-from tqdm import tqdm
 import PyPDF2
 from io import BytesIO
 import time
 import os
+import glob
 import ocrmypdf
 import tempfile
+import sys
+import re
 from openai import OpenAI
 from google import genai
 from google.genai import types
 from rich.console import Console
-import re 
-# SETUP -------------------------------------------------------------------------------------------------------
+
 console = Console()
 
-# PDF parsing ---------------------------------------------------------------------------------------------------------------
-def load_csv(file_path):
-    
-    try:
-        file = pd.read_csv(file_path,encoding="utf-8")
-        return file
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-    
+
+def resource_path(relative_path):
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+
+
+load_dotenv(resource_path(".env"))
+
+
+# PDF parsing ----------------------------------------------------------------
+
 def need_ocr(pdf_reader) -> bool:
     test_text = ""
-
-    for page in range(min(15,len(pdf_reader.pages))):
+    for page in range(min(15, len(pdf_reader.pages))):
         test_text += pdf_reader.pages[page].extract_text() or " "
-        
 
     if len(test_text) < 50:
         return True
-    
     return False
+
 
 def IMG_to_pdf(file_path):
     output_path = file_path
-    ocrmypdf.ocr(file_path,output_file=output_path,deskew=True)
-    
+    ocrmypdf.ocr(file_path, output_file=output_path, deskew=True)
     return output_path
 
-def extract_pdf_text(pdf_url,max_pages=None):
+
+def extract_pdf_text(pdf_path, max_pages=None):
+    """Read a local PDF file. OCR fallback if text is too sparse."""
     if max_pages is None:
         max_pages = 2000
 
     tmp_path = None
     try:
-        response = requests.get(pdf_url,timeout=30)
-        response.raise_for_status()
+        pdf_reader = PyPDF2.PdfReader(pdf_path)
 
-        # use bytesIO so data does not need to be saved in disk
-        pdf_buffer = BytesIO(response.content)
-        pdf_reader = PyPDF2.PdfReader(pdf_buffer)
-
-        if need_ocr(pdf_reader=pdf_reader):
-            with tempfile.NamedTemporaryFile(suffix=".pdf",delete=False) as tmp:
-                tmp.write(response.content)
+        if need_ocr(pdf_reader):
+            # copy to temp file so ocrmypdf can overwrite it
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                with open(pdf_path, "rb") as src:
+                    tmp.write(src.read())
                 tmp_path = tmp.name
-            
+
             IMG_to_pdf(tmp_path)
-            # Re-read the OCR'd PDF
             pdf_reader = PyPDF2.PdfReader(tmp_path)
 
         text = ""
-        num_pages = min(len(pdf_reader.pages),max_pages)
+        num_pages = min(len(pdf_reader.pages), max_pages)
 
         for page in range(num_pages):
             text += pdf_reader.pages[page].extract_text() or ""
 
         return text
-    
+
     except Exception as e:
-        print(f"error: {e}")
+        print(f"  PDF extraction error: {e}")
         return None
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
-# ----------------------------------------------------------------------------------------------------------------------------------------------
 
-# API CALLS ------------------------------------------------------------------------------------------------------------------------------------
-    
+
+# JSON helpers ---------------------------------------------------------------
+
 def _fix_json_strings(s):
     """Escape raw newlines/tabs inside JSON string values."""
     result = []
@@ -118,6 +115,7 @@ def _fix_json_strings(s):
         i += 1
     return ''.join(result)
 
+
 def format_api_output(input):
     if not input or not input.strip():
         return None
@@ -147,124 +145,109 @@ def format_api_output(input):
 
     return None
 
-def connect_to_DeepSeek(api_key,prompt,chat_model=None,max_tries=None):
 
+# LLM connectors ------------------------------------------------------------
+
+def connect_to_DeepSeek(api_key, prompt, chat_model=None, max_tries=None):
     if chat_model is None:
-        chat_model='deepseek-chat'
-
+        chat_model = "deepseek-chat"
     if max_tries is None:
         max_tries = 8
 
-    for attempt in range(1,max_tries + 1):
-
+    for attempt in range(1, max_tries + 1):
         try:
             api_url = "https://api.deepseek.com/v1/chat/completions"
-
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
             }
-
             payload = {
                 "model": chat_model,
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 5000,
                 "temperature": 0,
             }
-
-            response = requests.post(api_url,headers=headers,json=payload,timeout=60)
+            response = requests.post(api_url, headers=headers, json=payload, timeout=60)
             response.raise_for_status()
-
             result = response.json()
             content = result["choices"][0]["message"]["content"]
-
             return format_api_output(content)
-     
+
         except Exception as e:
-            time.sleep(1)
-            print("all tries completed")
-            return None
-            
-            # if(attempt < max_tries):
-            #     time.sleep(2 ** attempt)
-            # else:
-            #     print("all tries completed")
-            #     return None
+            print(f"    DeepSeek attempt {attempt} failed: {e}")
+            if attempt < max_tries:
+                time.sleep(2 ** attempt)
+            else:
+                print("    All DeepSeek tries exhausted")
+                return None
 
-def connect_to_GPT(api_key,prompt,chat_model=None,max_tries=None):
 
+def connect_to_GPT(api_key, prompt, chat_model=None, max_tries=None):
     if chat_model is None:
         chat_model = "gpt-5.1"
-
-    
     if max_tries is None:
         max_tries = 8
 
-    for attempt in range(1,max_tries + 1):
+    for attempt in range(1, max_tries + 1):
         try:
             client = OpenAI(api_key=api_key)
-
             response = client.chat.completions.create(
                 model=chat_model,
                 messages=[{"role": "user", "content": prompt}],
                 max_completion_tokens=3000,
                 temperature=0,
             )
-
             content = response.choices[0].message.content
             return format_api_output(content)
-        
-        except Exception as e:
-            print(f"Attempt:{attempt} failed")
-            print(f"Error: {e}")
 
-            if(attempt < max_tries):
+        except Exception as e:
+            print(f"    GPT attempt {attempt} failed: {e}")
+            if attempt < max_tries:
                 time.sleep(2 ** attempt)
             else:
-                print("all tries completed")
+                print("    All GPT tries exhausted")
                 return None
-            
-def connect_to_Gemini(api_key,prompt,chat_model=None,max_tries=None):
 
+
+def connect_to_Gemini(api_key, prompt, chat_model=None, max_tries=None):
     if chat_model is None:
         chat_model = "gemini-3.1-pro-preview"
-        
     if max_tries is None:
         max_tries = 8
 
-    for attempt in range(1,max_tries + 1):
+    for attempt in range(1, max_tries + 1):
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model = chat_model,
-                contents = prompt,
-                config = types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_level="high",include_thoughts=False),
-                    max_output_tokens=5000
-                ) 
-            )  
-
+                model=chat_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    thinking_config=types.ThinkingConfig(thinking_level="high", include_thoughts=False),
+                    max_output_tokens=5000,
+                ),
+            )
             content = response.text
             return format_api_output(content)
 
         except Exception as e:
-            print(f"Attempt:{attempt} failed")
-            print(f"Error: {e}")
-            if(attempt < max_tries):
+            print(f"    Gemini attempt {attempt} failed: {e}")
+            if attempt < max_tries:
                 time.sleep(2 ** attempt)
             else:
-                print("all tries completed")
+                print("    All Gemini tries exhausted")
                 return None
-# ----------------------------------------------------------------------------------------------------------------------------
-# Prompt --------------------------------------------------------------------------------------------------------------------------
-def create_prompt(pdf_url, pdf_text):
+
+
+# Prompt ---------------------------------------------------------------------
+
+def create_prompt(pdf_filename, pdf_text):
     input_prompt = f"""You are a rigorous content analyst coding an organization's annual report. Analyze the following document and return ONLY a valid JSON object with no other text, no markdown fences, and no preamble.
 
 CRITICAL RULE FOR MISSING DATA:
 - For NUMERIC fields (scores, category codes): use 999 if the document does not contain enough information to determine a valid answer.
 - For TEXT fields (names, explanations, justifications): use "N/A" if the document does not contain enough information to determine a valid answer.
 
-PDF URL: {pdf_url}
+PDF File: {pdf_filename}
 
 PDF TEXT:
 {pdf_text}
@@ -426,7 +409,7 @@ Return ONLY this JSON structure with no additional text:
     return input_prompt
 
 
-# Field definitions -----------------------------------------------------------
+# Result field list ----------------------------------------------------------
 
 JSON_FIELDS = [
     "Org_Name", "Year",
@@ -445,7 +428,7 @@ JSON_FIELDS = [
     "META_Type", "META_TypeName",
 ]
 
-# Fields that expect numeric values (use 999 as default when missing)
+# Fields that expect numeric values (use 999 as default)
 NUMERIC_FIELDS = {
     "ID_Primary", "ID_Intensity", "ID_OutType", "ID_OutIntensity", "ID_UsVsThem",
     "ISS1_Econ_Pos", "ISS1_Econ_Int",
@@ -460,7 +443,7 @@ NUMERIC_FIELDS = {
     "META_Type",
 }
 
-# All other fields are text (use "N/A" as default when missing)
+# All other fields are text (use "N/A" as default)
 
 
 def _default_for_field(field_name):
@@ -470,81 +453,86 @@ def _default_for_field(field_name):
     return "N/A"
 
 
-# Batch Processing ------------------------------------------------------------------------------------------------------------------------
+# Single-PDF processing ------------------------------------------------------
 
-def batch_processing(df_batch,pdf_url_column,deepseek_key,gemini_key,gpt_key,batch_num=0,total_rows=0,rows_done=0):
+def pdf_processing(pdf_path, deepseek_key, gemini_key, gpt_key):
+    """Process one local PDF file. Returns a dict (one row) with ds_/gm_/gpt_ prefixed fields."""
+
+    result_row = {"PDF": os.path.basename(pdf_path)}
+
+    start_time = time.time()
+    pdf_txt = extract_pdf_text(pdf_path)
+    elapsed = time.time() - start_time
+
+    if pdf_txt is None:
+        print(f"  PDF extraction FAILED ({elapsed:.1f}s)")
+        return result_row
+    else:
+        print(f"  PDF extracted: {len(pdf_txt)} chars, {elapsed:.1f}s")
+
+    pdf_filename = os.path.basename(pdf_path)
+    prompt = create_prompt(pdf_filename=pdf_filename, pdf_text=pdf_txt)
+
+    print("  Calling DeepSeek...", end=" ", flush=True)
+    deepseek_output = connect_to_DeepSeek(api_key=deepseek_key, prompt=prompt)
+    print("OK" if deepseek_output else "FAILED")
+
+    print("  Calling Gemini...", end=" ", flush=True)
+    gemini_output = connect_to_Gemini(api_key=gemini_key, prompt=prompt)
+    print("OK" if gemini_output else "FAILED")
+
+    print("  Calling GPT...", end=" ", flush=True)
+    gpt_output = connect_to_GPT(api_key=gpt_key, prompt=prompt)
+    print("OK" if gpt_output else "FAILED")
+
+    llm_outputs = {
+        "ds": deepseek_output,
+        "gm": gemini_output,
+        "gpt": gpt_output,
+    }
+
+    for prefix, output in llm_outputs.items():
+        if output:
+            for field in JSON_FIELDS:
+                result_row[f"{prefix}_{field}"] = output.get(field, _default_for_field(field))
+        else:
+            for field in JSON_FIELDS:
+                result_row[f"{prefix}_{field}"] = "Parsing Error"
+
+    return result_row
+
+
+# Directory processing -------------------------------------------------------
+
+def process_directory(pdf_dir, output_csv, deepseek_key, gemini_key, gpt_key):
+    """Iterate through all PDFs in a directory, process each, save results to CSV."""
+
+    pdf_files = sorted(glob.glob(os.path.join(pdf_dir, "**", "*.pdf"), recursive=True))
+
+    if not pdf_files:
+        print(f"No PDF files found in {pdf_dir}")
+        return pd.DataFrame()
+
+    print(f"Found {len(pdf_files)} PDF(s) in {pdf_dir}\n")
+
     results = []
-    batch_size = len(df_batch)
 
-    for rows_in_batch,(idx,row) in enumerate(df_batch.iterrows(),1):
-        current_total = rows_done + rows_in_batch
-        
+    for i, pdf_path in enumerate(pdf_files, 1):
+        print(f"[{i}/{len(pdf_files)}] {os.path.basename(pdf_path)}")
 
-        # convert df row to dict format
-        result_row = row.to_dict()
-        
-        pdf_url = row[pdf_url_column]
+        row = pdf_processing(
+            pdf_path=pdf_path,
+            deepseek_key=deepseek_key,
+            gemini_key=gemini_key,
+            gpt_key=gpt_key,
+        )
+        results.append(row)
 
-        if not isinstance(pdf_url,str) or not pdf_url:
-            continue
+        # incremental save
+        df = pd.DataFrame(results)
+        df.to_csv(output_csv, index=False)
+        print(f"  -> Saved {len(df)} rows to {output_csv}\n")
 
-        print(f"  Downloading PDF: {pdf_url[:100]}...")
-        start_time = time.time()
-        pdf_txt = extract_pdf_text(pdf_url=pdf_url)
-        elapsed = time.time() - start_time
-
-        if pdf_txt is None:
-            print(f"  PDF extraction FAILED ({elapsed:.1f}s)")
-        else:
-            print(f"  PDF extracted: {len(pdf_txt)} chars, {elapsed:.1f}s")
-
-        
-        prompt = create_prompt(pdf_url=pdf_url,pdf_text=pdf_txt)
-        print(f"  Calling LLMs...", end=" ", flush=True)
-        start_time = time.time()
-
-        print("Calling DeepSeek")
-        deepseek_output = connect_to_DeepSeek(api_key=deepseek_key,prompt=prompt)
-
-        print("Calling Gemini")
-        gemini_output = connect_to_Gemini(api_key=gemini_key,prompt=prompt)
-
-        print("Calling GPT")
-        gpt_output = connect_to_GPT(api_key=gpt_key,prompt=prompt)
-
-        LLM_status = all([deepseek_output,gemini_output,gpt_output])
-
-        if LLM_status:
-            print("All LLM responded")
-        else:
-            print("LLM response fail")
-
-        llm_outputs = {
-            "ds": deepseek_output,
-            "gm": gemini_output,
-            "gpt": gpt_output,
-        }
-
-        for prefix, output in llm_outputs.items():
-            if output:
-                for field in JSON_FIELDS:
-                    result_row[f"{prefix}_{field}"] = output.get(field, _default_for_field(field))
-            else:
-                 for field in JSON_FIELDS:
-                    result_row[f"{prefix}_{field}"] = "Parsing Error"
-        
-        results.append(result_row)
-
-    return pd.DataFrame(results)
-
-def main():
-    pass
-
-if __name__ == "__main__":
-    main()
-
-
-
-
-
-   
+    final = pd.DataFrame(results)
+    print(f"Done. {len(final)} rows across {len(pdf_files)} PDFs.")
+    return final

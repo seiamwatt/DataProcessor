@@ -35,6 +35,7 @@ import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
 import pytz
+import os
 
 
 
@@ -139,6 +140,10 @@ def show():
         total_batches = (len(df_subset) + batch_size - 1) // batch_size
 
         console.print("[bold red]processing Data")
+        row_to_process = end_row - start_row
+        console.print(f"[bold red]row to process:{row_to_process}")
+
+        curr_row = start_row
 
 
         with Progress() as progress:
@@ -148,13 +153,22 @@ def show():
             for i in range(0, len(df_subset), batch_size):
                 batch_num = i // batch_size + 1
                 console.print(f"[bold blue] Batch num: {batch_num}")
+                
+                print(f"Current row:{curr_row}")
+                curr_row += 1
+
                 batch = df_subset.iloc[i:i + batch_size]
                 batch_result = analysis_v2.batch_processing(batch, col_name, deep_key, gemini_key, gpt_key)
-                batch_result.to_csv(output_path, mode='a', header=(i == 0))
+
+                if os.path.exists(output_path):
+                    write_header = False
+                else:
+                    write_header=True
+
+                batch_result.to_csv(output_path, mode='a', header=write_header)
+
                 progress.update(task1, advance=1)
 
-            
-            
             id = str(uuid.uuid4())
             progress.stop()
             # upload_to_s3(input_path=input_path,output_path=output_path)

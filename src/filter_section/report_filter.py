@@ -128,7 +128,7 @@ For the "year" field:
     return prompt
 
 
-def DeepSeek_Connect(api_key, prompt, model="deepseek-chat"):
+def DeepSeek_Connect(api_key, prompt, model="deepseek-reasoner"):
 
     try:
         api_url = "https://api.deepseek.com/v1/chat/completions"

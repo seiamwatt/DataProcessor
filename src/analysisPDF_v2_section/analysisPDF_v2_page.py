@@ -310,7 +310,7 @@ def show():
         if exit_choice:
             status = False
 
-    console.print(Panel("[bold blue]Goodbye![/bold blue]", border_style="blue"))
+    
 
 
 if __name__ == "__main__":

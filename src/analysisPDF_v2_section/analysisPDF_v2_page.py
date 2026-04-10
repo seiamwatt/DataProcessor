@@ -115,24 +115,22 @@ def processing_end_panel(total_pdfs: int, elapsed: float, output_path: str) -> P
 
 
 # ── Single PDF processor (with console output) ─────────────────────────────
-
-
 def process_single_pdf(pdf_path, deep_key, gemini_key, gpt_key, max_pages):
     """Process one PDF through all three LLMs. Returns a result dict."""
 
     result_row = {"PDF": os.path.basename(pdf_path)}
 
     # extract text
-    console.print("  [dim]Extracting text...[/dim]", end=" ")
+    print("  Extracting text...", end=" ")
     t0 = time.time()
     pdf_txt = analysisPDF_v2.extract_pdf_text(pdf_path, max_pages=max_pages)
     ext_time = time.time() - t0
 
     if pdf_txt is None:
-        console.print(f"[bold red]FAILED[/bold red] ({ext_time:.1f}s)")
+        print(f"FAILED ({ext_time:.1f}s)")
         return result_row
 
-    console.print(f"[green]{len(pdf_txt)} chars[/green] ({ext_time:.1f}s)")
+    print(f"{len(pdf_txt)} chars ({ext_time:.1f}s)")
 
     prompt = analysisPDF_v2.create_prompt(
         pdf_filename=os.path.basename(pdf_path),
@@ -147,20 +145,19 @@ def process_single_pdf(pdf_path, deep_key, gemini_key, gpt_key, max_pages):
     ]
 
     for display_name, prefix, call_fn in llm_calls:
-        console.print(f"  [dim]Calling {display_name}...[/dim]", end=" ")
+        print(f"  Calling {display_name}...", end=" ")
         output = call_fn()
 
         if output:
-            console.print("[bold green]✓[/bold green]")
+            print("PASSED")
             for field in analysisPDF_v2.JSON_FIELDS:
                 result_row[f"{prefix}_{field}"] = output.get(field, "")
         else:
-            console.print("[bold red]✗[/bold red]")
+            print("FAILED")
             for field in analysisPDF_v2.JSON_FIELDS:
                 result_row[f"{prefix}_{field}"] = "Parsing Error"
 
     return result_row
-
 
 # ── Main loop ──────────────────────────────────────────────────────────────
 
@@ -261,10 +258,7 @@ def show():
         # ── Processing ──────────────────────────────────────────────────
         pdf_subset = pdf_files[start_pdf:end_pdf]
         total = len(pdf_subset)
-        console.print()
         console.print(f"[bold red]Processing PDFs {start_pdf}–{end_pdf - 1} ({total} PDF(s))[/bold red]")
-        console.print()
-
         results = []
         time_start = time.time()
 
@@ -273,9 +267,9 @@ def show():
 
             for i, pdf_path in enumerate(pdf_subset, 1):
                 global_idx = start_pdf + i - 1
-                console.print(
-                    f"[bold blue][{global_idx}/{len(pdf_files)}][/bold blue] {os.path.basename(pdf_path)}"
-                )
+               
+
+                print( f"[{global_idx}/{len(pdf_files)}] {os.path.basename(pdf_path)}")
 
                 row = process_single_pdf(
                     pdf_path=pdf_path,

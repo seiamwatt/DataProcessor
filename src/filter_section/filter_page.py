@@ -36,7 +36,7 @@ from botocore.exceptions import ClientError
 from datetime import datetime
 import pytz
 
-import report_filter
+from filter_section import report_filter
 console = Console()
 os.environ["TERM"] = "xterm-256color"
 

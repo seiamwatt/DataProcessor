@@ -1,12 +1,12 @@
 from rich.console import Console
 
 from filter_section import report_filter
-import time 
+import time
 import questionary
 import subprocess
 import os
 
-# CUSTOM MODULES HERE 
+# CUSTOM MODULES HERE
 from main_section import main_page
 from main_section import settings_page
 from filter_section import filter_page
@@ -46,13 +46,13 @@ def main():
         analysis_v2_page.show()
     elif choice == "LLM Analysis V2 - Raw PDF":
         analysisPDF_v2_page.show()
-    
+
     elif choice == "Settings":
         settings_page.show()
-   
+
 if __name__ == "__main__":
     main()
-    
+
 # ---------------------------------------------------------------------------------
 
 

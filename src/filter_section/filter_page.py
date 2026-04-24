@@ -148,16 +148,21 @@ def show():
         total_batches = (len(df_subset) + batch_size - 1) // batch_size
         console.print("[bold red]processing Data")
 
+        row_track = start_row
+
         with Progress() as progress:
             time_start = time.time()
             task1 = progress.add_task("[red]Filtering Data", total=total_batches)
 
             for i in range(0, len(df_subset), batch_size):
                 batch_num = i // batch_size + 1
-                console.print(f"[bold blue] Batch num: {batch_num}")
+                console.print(f"[bold blue] Batch num: {batch_num}.  Row Number: {row_track}")
+                
                 batch = df_subset.iloc[i:i+batch_size]
                 batch_result = report_filter.batch_processing(df_batch=batch, api_key=api_key, pdf_url_column=col_name, extract_text=True)
-                batch_result.to_csv(output_path, mode='a', header=(i == 0))
+                batch_result.to_csv(output_path, mode='a', header=(i == 0),index = False)
+
+                row_track = row_track + 1
                 progress.update(task1, advance=1)
 
             id = str(uuid.uuid4())

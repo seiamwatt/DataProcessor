@@ -70,8 +70,8 @@ def extract_pdf_text(pdf_url, max_pages=15):
 
         for page in range(num_pages):
             text += pdf_reader.pages[page].extract_text() or ""
-
-        return text[:200000]
+        # edit amount of text extracted here
+        return text[:2000]
 
     except Exception as e:
         print(f"error processing pdf: {e}")

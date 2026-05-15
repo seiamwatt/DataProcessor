@@ -156,11 +156,17 @@ def show():
 
             for i in range(0, len(df_subset), batch_size):
                 batch_num = i // batch_size + 1
-                console.print(f"[bold blue] Batch num: {batch_num}.  Row Number: {row_track}")
-                
+                console.print(f"[bold blue] Batch num: {batch_num} | Row Number: {row_track}")
+
                 batch = df_subset.iloc[i:i+batch_size]
                 batch_result = report_filter.batch_processing(df_batch=batch, api_key=api_key, pdf_url_column=col_name, extract_text=True)
-                batch_result.to_csv(output_path, mode='a', header=(i == 0),index = False)
+
+                if os.path.exists(output_path):
+                    write_header = False
+                else: 
+                    write_header = True
+
+                batch_result.to_csv(output_path, mode='a', header=write_header,index = False)
 
                 row_track = row_track + 1
                 progress.update(task1, advance=1)

@@ -11,6 +11,7 @@ import os
 import tempfile
 from rich.console import Console
 import sys, os
+from rich.progress import Progress
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 def resource_path(relative_path):
@@ -30,76 +31,92 @@ def load_csv(file_path):
         return None
     
 
-def populate_data(preferred_NTEE_code, num_pages,ntee_id):
+def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id):
 
     url = "https://projects.propublica.org/nonprofits/api/v2"
 
     results = []
     filtered_results = []
 
-    # Step 1: Search by broad NTEE category, page by page
-    for page in range(num_pages):
-        params = {
-            "ntee[id]": ntee_id,
-            "page": page
-        }
+    with Progress() as progress:
+        task1 = progress.add_task("[red]Processing Data", total=num_pages)
 
-        response = requests.get(url=f"{url}/search.json", params=params)
-        data = response.json()
-        print(f"Connected - page {page}")
-        
-        orgs = data.get("organizations", [])
-        
-        if not orgs:
-            break
+        for page in range(num_pages):
+            params = {
+                "ntee[id]": ntee_catagory_id,
+                "page": page
+            }
 
-        results.extend(orgs)
-        time.sleep(1)
+            response = requests.get(url=f"{url}/search.json", params=params)
+            data = response.json()
+            progress.console.print(f"Connected - page {page}")
+            progress.update(task1, advance=1)
 
-    print(f"Found {len(results)} total orgs from search")
+            orgs = data.get("organizations", [])
 
-    # Step 2: Get details for each org and filter
-    for org in results:
-        ein = org["ein"]
-        detail_url = f"{url}/organizations/{ein}.json"
-        response = requests.get(detail_url)
-        data = response.json()
+            if not orgs:
+                break
 
-        print("org data obtained")
+            results.extend(orgs)
+            time.sleep(5)
 
-        org_data = data.get("organization", {})
-        ntee_code = org_data.get("ntee_code", "")
-        ruling_date = org_data.get("ruling_date", "")
+    console = Console()
+    console.print(f"Found {len(results)} total orgs from search")
 
-        if not ruling_date:
-            continue
+    with Progress() as progress:
+        task1 = progress.add_task("[red]Filtering Data", total=len(results))
+        obtained_count = 0
+        appended_count = 0
+        for org in results:
+            ein = org["ein"]
+            detail_url = f"{url}/organizations/{ein}.json"
+            response = requests.get(detail_url)
+            data = response.json()
 
-        ruling_year = int(str(ruling_date)[:4])
+            obtained_count += 1
+            progress.console.print(f"organisation data obtained | number obtained: {obtained_count}")
 
-        if ntee_code == preferred_NTEE_code and ruling_year <= 2000:
-            filtered_results.append({
-                "name": org_data.get("name"),
-                "ein": ein,
-                "ntee_code": ntee_code,
-                "ruling_date": ruling_date,
-                "city": org_data.get("city"),
-                "state": org_data.get("state"),
-            })
+            org_object = data.get("organization", {})
 
-            print(f"Data appended: {org_data.get('name')}")
+            ntee_code = org_object.get("ntee_code", "")
+            ruling_date = org_object.get("ruling_date", "")
 
-        time.sleep(1)
+            if not ruling_date:
+                progress.update(task1, advance=1)
+                continue
+
+            ruling_year = int(str(ruling_date)[:4])
+
+            if ntee_code == preferred_NTEE_code and ruling_year <= 2000:
+                filtered_results.append({
+                    "name": org_object.get("name"),
+                    "ein": ein,
+                    "ntee_code": ntee_code,
+                    "ruling_date": ruling_date,
+                    "address": org_object.get("address"),
+                    "city": org_object.get("city"),
+                    "state": org_object.get("state"),
+                    "revenue": org_object.get("revenue_amount"),
+                    "asset_amount": org_object.get("asset_amount"),
+                    "total_asset_end": org_object.get("totassetend")
+                })
+
+                appended_count += 1
+                progress.console.print(f"[green]Data appended: {org_object.get('name')} | Appended: {appended_count}")
+
+            time.sleep(1)
+            progress.update(task1, advance=1)
 
     return filtered_results
 
-
 def main():
     # test code
-    results = populate_data(preferred_NTEE_code="A01",num_pages=10,ntee_id=1)
+    # results = populate_data(preferred_NTEE_code="A01",num_pages=100,ntee_id=1)
     
-    print(f"\nTotal filtered results: {len(results)}")
-    for r in results:
-        print(r)
+    # print(f"\nTotal filtered results: {len(results)}")
+    # for r in results:
+    #     print(r)
+    return
 
 
 if __name__ == "__main__":

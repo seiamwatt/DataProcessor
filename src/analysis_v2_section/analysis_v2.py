@@ -475,7 +475,7 @@ def _default_for_field(field_name):
 def batch_processing(df_batch,pdf_url_column,deepseek_key,gemini_key,gpt_key,batch_num=0,total_rows=0,rows_done=0):
     results = []
     batch_size = len(df_batch)
-
+    
     for rows_in_batch,(idx,row) in enumerate(df_batch.iterrows(),1):
         current_total = rows_done + rows_in_batch
         

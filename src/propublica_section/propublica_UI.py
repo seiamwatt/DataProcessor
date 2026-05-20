@@ -112,6 +112,12 @@ def show():
 
         console.print("[bold cyan]End of processing")
 
+        run_again = questionary.confirm("Repeat processing?").ask()
+        if not run_again:
+            status = False
+
+            
+
 
 if __name__ == "__main__":
     show()

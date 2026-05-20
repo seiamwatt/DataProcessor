@@ -30,7 +30,6 @@ def load_csv(file_path):
         print("load csv failed")
         return None
     
-
 def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id):
 
     url = "https://projects.propublica.org/nonprofits/api/v2"
@@ -38,27 +37,44 @@ def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id):
     results = []
     filtered_results = []
 
+    states =  [
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+    "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+    "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+    "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+    "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY",
+    "DC","AS","GU","MP","PR","VI","ZZ"]
+
+
     with Progress() as progress:
-        task1 = progress.add_task("[red]Processing Data", total=num_pages)
+        task1 = progress.add_task("[red]Processing Data", total=num_pages * len(states))
 
-        for page in range(num_pages):
-            params = {
-                "ntee[id]": ntee_catagory_id,
-                "page": page
-            }
+        for state in states:
 
-            response = requests.get(url=f"{url}/search.json", params=params)
-            data = response.json()
-            progress.console.print(f"Connected - page {page}")
-            progress.update(task1, advance=1)
+            for page in range(num_pages):
+                params = {
+                    "ntee[id]": ntee_catagory_id,
+                    "page": page,
+                    "state[id]":state
+                }
 
-            orgs = data.get("organizations", [])
+                try:
+                    response = requests.get(url=f"{url}/search.json", params=params)
+                    data = response.json()
+                    progress.console.print(f"Connected - page {page}")
+                    progress.update(task1, advance=1)
 
-            if not orgs:
-                break
+                    orgs = data.get("organizations", [])
 
-            results.extend(orgs)
-            time.sleep(5)
+                    if not orgs:
+                        break
+                except Exception as e:
+                    print("API call error")
+                    time.sleep(10)
+                    continue
+
+                results.extend(orgs)
+                time.sleep(5)
 
     console = Console()
     console.print(f"Found {len(results)} total orgs from search")
@@ -68,10 +84,24 @@ def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id):
         obtained_count = 0
         appended_count = 0
         for org in results:
+            ntee_code = org.get("ntee_code", " ")
+
+
+            if ntee_code != preferred_NTEE_code:
+                progress.update(task1,advance=1)
+                continue
+
+
             ein = org["ein"]
             detail_url = f"{url}/organizations/{ein}.json"
-            response = requests.get(detail_url)
-            data = response.json()
+
+            try:
+                response = requests.get(detail_url)
+                data = response.json()
+            except Exception as e:
+                print("API call error")
+                time.sleep(10)
+                continue
 
             obtained_count += 1
             progress.console.print(f"organisation data obtained | number obtained: {obtained_count}")
@@ -85,7 +115,11 @@ def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id):
                 progress.update(task1, advance=1)
                 continue
 
-            ruling_year = int(str(ruling_date)[:4])
+            try:
+                ruling_year = int(str(ruling_date)[:4])
+            except Exception as e:
+                print("ruling year error")
+                continue
 
             if ntee_code == preferred_NTEE_code and ruling_year <= 2000:
                 filtered_results.append({

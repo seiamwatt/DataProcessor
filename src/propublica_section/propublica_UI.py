@@ -90,6 +90,12 @@ def show():
                 num_page = questionary.text("Number of pages to process").ask()
                 num_page = int(num_page)
 
+                start_state_index = questionary.text("Start State Index").ask()
+                start_state_index = int(start_state_index)
+
+                end_state_index = questionary.text("End State Index").ask()
+                end_state_index = int(end_state_index)
+
                 input_valid = True
             except Exception as e:
                 console.print("[bold red]Invalid input")
@@ -100,6 +106,8 @@ def show():
             preferred_NTEE_code=ntee_code,
             num_pages=num_page,
             ntee_catagory_id=ntee_code_catagory,
+            start_state_index=start_state_index,
+            end_state_index=end_state_index
         )
 
         if results:
@@ -116,7 +124,7 @@ def show():
         if not run_again:
             status = False
 
-            
+
 
 
 if __name__ == "__main__":

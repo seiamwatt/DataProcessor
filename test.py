@@ -38,20 +38,6 @@ print("=" * 70)
 print(f"Testing category {TEST_CATEGORY}: {categories[TEST_CATEGORY]}")
 print("=" * 70)
 
-# --- OLD APPROACH: no state filter ---
-print("\n[OLD APPROACH] No state filter:")
-try:
-    data = fetch(f"{base_url}?ntee%5Bid%5D={TEST_CATEGORY}")
-    old_total = data.get("total_results", "N/A")
-    old_pages = data.get("num_pages", "N/A")
-    print(f"  Total results: {old_total}")
-    print(f"  Pages: {old_pages}")
-    print(f"  Capped: {'YES (likely)' if old_total == 10000 else 'No'}")
-except Exception as e:
-    print(f"  ERROR: {e}")
-
-time.sleep(1)
-
 # --- NEW APPROACH: loop through states ---
 print(f"\n[NEW APPROACH] Looping through {len(states)} states:")
 print(f"{'State':<8} {'Results':<12} {'Pages':<8}")

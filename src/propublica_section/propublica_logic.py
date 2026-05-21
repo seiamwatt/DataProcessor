@@ -30,7 +30,7 @@ def load_csv(file_path):
         print("load csv failed")
         return None
     
-def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id):
+def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id,start_state_index,end_state_index):
 
     url = "https://projects.propublica.org/nonprofits/api/v2"
 
@@ -47,15 +47,16 @@ def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id):
 
 
     with Progress() as progress:
-        task1 = progress.add_task("[red]Processing Data", total=num_pages * len(states))
+        task1 = progress.add_task("[red]Processing Data", total=num_pages * (end_state_index - start_state_index))
 
-        for state in states:
+        for i in range(start_state_index,end_state_index):
+            print(f"State Index: {i}")
 
             for page in range(num_pages):
                 params = {
                     "ntee[id]": ntee_catagory_id,
                     "page": page,
-                    "state[id]":state
+                    "state[id]":states[i]
                 }
 
                 try:

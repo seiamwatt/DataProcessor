@@ -85,7 +85,7 @@ def show():
                     console.print("[bold red]Path is not a valid file or folder, try again")
                     continue
                 ntee_code_catagory = questionary.text("NTEE code category 1-10").ask()
-                ntee_code = questionary.text("NTEE code (e.g. A01)").ask()
+                # ntee_code = questionary.text("NTEE code (e.g. A01)").ask()
 
                 num_page = questionary.text("Number of pages to process").ask()
                 num_page = int(num_page)
@@ -103,7 +103,6 @@ def show():
         console.print("[bold cyan]Processing Data")
 
         results = propublica_logic.populate_data(
-            preferred_NTEE_code=ntee_code,
             num_pages=num_page,
             ntee_catagory_id=ntee_code_catagory,
             start_state_index=start_state_index,

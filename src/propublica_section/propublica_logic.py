@@ -30,13 +30,22 @@ def load_csv(file_path):
         print("load csv failed")
         return None
     
-def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id,start_state_index,end_state_index):
+
+def page_overview():
+    pass
+
+
+    
+def populate_data(num_pages, ntee_catagory_id,start_state_index,end_state_index):
+
+    full_range_letters = {'R','X','C','D','B','P','A','N'}
 
     url = "https://projects.propublica.org/nonprofits/api/v2"
 
     results = []
     filtered_results = []
 
+    # len is 57
     states =  [
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
     "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
@@ -45,9 +54,8 @@ def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id,start_state_i
     "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY",
     "DC","AS","GU","MP","PR","VI","ZZ"]
 
-
     with Progress() as progress:
-        task1 = progress.add_task("[red]Processing Data", total=num_pages * (end_state_index - start_state_index))
+        task1 = progress.add_task("[red]Processing pages", total=num_pages * (end_state_index - start_state_index))
 
         for i in range(start_state_index,end_state_index):
             print(f"State Index: {i}")
@@ -84,17 +92,23 @@ def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id,start_state_i
         task1 = progress.add_task("[red]Filtering Data", total=len(results))
         obtained_count = 0
         appended_count = 0
+
         for org in results:
             ntee_code = org.get("ntee_code", " ")
 
-
-            if ntee_code != preferred_NTEE_code:
-                progress.update(task1,advance=1)
+            if not ntee_code:
                 continue
 
-
-            ein = org["ein"]
-            detail_url = f"{url}/organizations/{ein}.json"
+            if ntee_code[0] in full_range_letters:
+                ein = org["ein"]
+                detail_url = f"{url}/organizations/{ein}.json"
+            elif ntee_code[1:] == "01":
+                ein = org["ein"]
+                detail_url = f"{url}/organizations/{ein}.json"
+            else:
+                progress.update(task1,advance=1)
+                print("NTEE code does not match, skipping detail url call")
+                continue
 
             try:
                 response = requests.get(detail_url)
@@ -122,7 +136,7 @@ def populate_data(preferred_NTEE_code, num_pages, ntee_catagory_id,start_state_i
                 print("ruling year error")
                 continue
 
-            if ntee_code == preferred_NTEE_code and ruling_year <= 2000:
+            if ruling_year <= 2000:
                 filtered_results.append({
                     "name": org_object.get("name"),
                     "ein": ein,

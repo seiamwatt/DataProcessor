@@ -62,10 +62,10 @@ for state in states:
 
     time.sleep(1)
 
+
 print("-" * 30)
 print(f"\n[RESULTS COMPARISON]")
-print(f"  Old approach (no state):  {old_total} results")
+
 print(f"  New approach (by state):  {grand_total} results")
-print(f"  Difference:               {grand_total - old_total} more orgs found")
 print(f"  Total pages across states: {grand_pages}")
 print("\nDone!")

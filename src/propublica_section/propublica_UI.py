@@ -22,6 +22,7 @@ from rich.align import Align
 from rich import box
 from rich.rule import Rule
 from rich.padding import Padding
+from rich.console import Group
 from dotenv import load_dotenv
 import os
 
@@ -55,14 +56,55 @@ def args_table() -> Table:
 
     table.add_row("Input CSV", "existing CSV to append results", "False")
     table.add_row("NTEE CODE category", "NTEE code 1-10", "True")
-    table.add_row("NTEE code", "NTEE code to search ex (A01)", "True")
     table.add_row("Num pages", "Number of pages to process", "True")
     return table
+
+def propublica_index() -> Table:
+    table = Table(title="[blue]Processing Index", border_style="bright_cyan",show_lines=True)
+    table.add_column("Category ID", style="cyan", justify="center")
+    table.add_column("Category", style="white")
+    table.add_column("Letters", style="green", justify="center")
+
+    categories = [
+        ("1",  "Arts, Culture & Humanities",    "A"),
+        ("2",  "Education",                     "B"),
+        ("3",  "Environment & Animals",         "C, D"),
+        ("4",  "Health",                        "E, F, G, H"),
+        ("5",  "Human Services",                "I, J, K, L, M, N, O, P"),
+        ("6",  "International, Foreign Affairs", "Q"),
+        ("7",  "Public, Societal Benefit",      "R, S, T, U, V, W"),
+        ("8",  "Religion Related",              "X"),
+        ("9",  "Mutual/Membership Benefit",     "Y"),
+        ("10", "Unknown, Unclassified",         "Z"),
+    ]
+
+    for cat_id, category, letters in categories:
+        table.add_row(cat_id, category, letters)
+
+    return table
+
+def display_tables():
+    panel = Panel(
+        Columns(
+            [args_table(), propublica_index()],
+            equal=True,
+            expand=True,
+        ),
+        title="[bold bright_cyan]ProPublica Nonprofit Explorer",
+        subtitle="[dim]nonprofit data toolkit",
+        border_style="bright_cyan",
+        padding=(1, 2),
+    )
+
+    console.print(panel)
 
 
 def show():
 
-    console.print(args_table())
+    # console.print(args_table())
+
+    display_tables()
+
 
     status = True
 
@@ -72,7 +114,7 @@ def show():
 
         while not input_valid:
             try:
-                input_csv_path = questionary.path("Input CSV file (leave blank for new file):").ask()
+                input_csv_path = questionary.path("Input CSV file (or drag a folder path in):").ask()
                 input_csv_path = input_csv_path.strip("'\"")
 
                 if os.path.isfile(input_csv_path):

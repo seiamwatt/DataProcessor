@@ -83,7 +83,7 @@ def populate_data(num_pages, ntee_catagory_id,start_state_index,end_state_index)
                     continue
 
                 results.extend(orgs)
-                time.sleep(5)
+                # time.sleep(5)
 
     console = Console()
     console.print(f"Found {len(results)} total orgs from search")
@@ -153,7 +153,7 @@ def populate_data(num_pages, ntee_catagory_id,start_state_index,end_state_index)
                 appended_count += 1
                 progress.console.print(f"[green]Data appended: {org_object.get('name')} | Appended: {appended_count}")
 
-            time.sleep(1)
+            # time.sleep(1)
             progress.update(task1, advance=1)
 
     return filtered_results

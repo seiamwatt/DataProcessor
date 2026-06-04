@@ -57,5 +57,8 @@ if __name__ == "__main__":
 
 # ---------------------------------------------------------------------------------
 
-
+# dowload version:
 # pyinstaller --onefile --add-data ".env:." src/main.py
+
+
+# test start in vs code terminal: /usr/local/bin/python3 /Users/smitheiamwattnasin/GitPage/DataProcessor/src/main.py

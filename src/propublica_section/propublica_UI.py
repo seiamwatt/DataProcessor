@@ -86,7 +86,7 @@ def propublica_index() -> Table:
 def display_tables():
     panel = Panel(
         Columns(
-            [args_table(), propublica_index()],
+            [propublica_index(), args_table()],
             equal=True,
             expand=True,
         ),
@@ -129,13 +129,13 @@ def show():
                 ntee_code_catagory = questionary.text("NTEE code category 1-10").ask()
                 # ntee_code = questionary.text("NTEE code (e.g. A01)").ask()
 
-                num_page = questionary.text("Number of pages to process").ask()
+                num_page = questionary.text("Number of pages to process",default="500").ask()
                 num_page = int(num_page)
 
-                start_state_index = questionary.text("Start State Index").ask()
+                start_state_index = questionary.text("Start State Index",default="0").ask()
                 start_state_index = int(start_state_index)
 
-                end_state_index = questionary.text("End State Index").ask()
+                end_state_index = questionary.text("End State Index",default="57").ask()
                 end_state_index = int(end_state_index)
 
                 input_valid = True

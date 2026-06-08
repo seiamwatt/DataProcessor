@@ -1,28 +1,28 @@
 # AWS
-boto3==1.43.10
-botocore==1.43.10
+boto3
+botocore
 
 # Environment / config
-python-dotenv==1.2.2
+python-dotenv
 
 # AI / LLM clients
 google-genai
 openai
 
 # Data processing
-pandas==3.0.2
+pandas
 
 # PDF / OCR
-ocrmypdf==17.4.2
-PyPDF2==3.0.1
+ocrmypdf
+PyPDF2
 
 # HTTP
-requests==2.34.2
+requests
 
 # CLI / UI
-rich==15.0.0
-tqdm==4.67.3
-questionary==2.1.1
+rich
+tqdm
+questionary
 
 # Date / time
 pytz

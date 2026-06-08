@@ -20,6 +20,7 @@ from analysis_v2_section import analysis_v2
 from analysisPDF_v2_section import analysisPDF_v2
 from analysisPDF_v2_section import analysisPDF_v2_page
 from propublica_section import propublica_UI
+from propublica_cloud_section import propublica_cloud_UI
 # SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
@@ -34,7 +35,7 @@ def choice_menu():
 
 def main():
     main_page.show()
-    choice = questionary.select("Select terminal",choices=["Filter Data","LLM Analysis - PDF URL","LLM Analysis - Raw PDF","LLM Analysis V2","LLM Analysis V2 - Raw PDF","Propublica API","Settings"]).ask()
+    choice = questionary.select("Select terminal",choices=["Filter Data","LLM Analysis - PDF URL","LLM Analysis - Raw PDF","LLM Analysis V2","LLM Analysis V2 - Raw PDF","Propublica API","Propublica API [CLOUD]","Settings"]).ask()
 
     if choice == "Filter Data":
         os.system("clear")
@@ -49,6 +50,8 @@ def main():
         analysisPDF_v2_page.show()
     elif choice == "Propublica API":
         propublica_UI.show()
+    elif choice == "Propublica API [CLOUD]":
+        propublica_cloud_UI.show()
     elif choice == "Settings":
         settings_page.show()
 

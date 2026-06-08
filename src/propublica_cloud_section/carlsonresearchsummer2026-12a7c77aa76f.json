@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "carlsonresearchsummer2026",
+  "private_key_id": "12a7c77aa76f54fcf7ffb7d67c7b5602d7e2546e",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCzK+TdJzaVLPYx\n2L7n2wM0PLnrLK9q4HsdDkyp/hoK5+LTAHPbYvtGaQsb4Dmp66LVsQllhz1fFa+5\n4NflGb1JB0jPHMjPnJ+iWWcOGZMplUMZLoV+/hlRzv5zI9UQD1D5xSPrp3mnnRVW\nas6lQkCD63ejDqId1JzvZh/215QN0iRrEdagT+tLKIQejfmOp3ZzosZVnT6RA/D3\nQ8WhyufkgTljgdIMjHtOqsvAt38nmOpbbQ7wA+VdOK8w175ewnMEGXPvACtM54np\njEks1k1qhaTx2tI37YaR+AGU8bShJ14LDVJYquXr6mDnA+k451HjsDXJMXyQ/ZT0\nuhPyfprZAgMBAAECggEAHUCElk21ZeAIFuXL70csy/3BHeH3BsQ9HWaNAjD79/1Z\nZTkc8TvFCf8S4vt19qXDuU802Uhd7vT3smmA3gTYiECB9Nx+dZTc5DDj+COZSO/3\nWzhi77OVFyvsE4jNW5igkBLNVUdLv5+QEQKRl94L8e3C49J7CdNBRv2dqNuT7rhy\n+zEDzEjcbMxZTuGyYesQPc2OkZlW8sEXd4DVh0W/ucvPhep6j+xWHO7Gw8AYoWmW\nYMYsOagYw/xaWsAjXh2xSIk6MTZL0zbgajPuATBtdSHp2cxI0vzooUi8ciL/qLMq\nw4Edej3SE+lbZqiSvx9sg2c/fxx4lhVggwKLo2qWTQKBgQDnAitEToLgs+Rd1Vi3\nQHeetlArqpSWX7e3qlMB5sbEWPDBQAet9RT3vedJx5GHY4ZPESEY0DXYl9v0qEN5\n16UNhlx4dbfMBs8Gjsd06OK96/9P2UCuoZtqF+VnFSa+4zVyPuR+WXqTLYInwRse\nfORR8j4mg+Om6y+wV3CS417WXQKBgQDGjhZhq9X8DuH0n1pNQTPUGyP50r8xFO1B\nz1Qv/HhyufxIgkVkIBtC3RuJtmwv2QbGOnZuAi1TAlWSmtjAn/LH8kGuZ3z43XzD\n20o8AsRnvv7xVqNxdxFuVx7LT5PjPJIIikz37MI+tluPG2sizPJ1M5yvk6+K8zYI\noyvnha7WrQKBgCyxD7vUUJ+2Td0VdGdnknzjGpmIE90PwZRH4G1Cv3unFVTd1V6D\nRr4zQDbW5EHEMGzFjJinV3OC1av8jalZ3fXC48ruQ1O2kYDcSJxGne9OZAOHrWrb\nmxyoaNpLjkZp4KIsproHB57HtCGKy3tXgDiWXA3JgFZ/s6czE3VnhaaFAoGAMSKU\nU1NMvvWH4RtWI2wRQVn+CyKmAaVmGTUPZliaDfoMfn0OYvq3BFLnL6sfFrAkRwXM\nrOiJAtO/DWqYXQK399bxfhFKEePtriIkOrmMlQfk2yBPjhKjE6Unj7R/qmog0VA4\nP9otL4u9GKr2VkRVc79z9NcdR8tsAbMveDnSzHkCgYBPUbopJJFKBbnY0tEqcdxX\nQeN7n1nCWG1r1HcUMM66nL3OlyEALFj2NqYPlZGHwnNzUmjORp2HCIPcUenTDX1L\nMJrC1ebIWFsEjSSJgyI3SfbEtgn3eifu4wsj/PVZrZpvYzyyJ+v6ZiKQYA4zViMz\nCPJqO//42EOwF+fu62/Adw==\n-----END PRIVATE KEY-----\n",
+  "client_email": "query1@carlsonresearchsummer2026.iam.gserviceaccount.com",
+  "client_id": "110082797846676058215",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/query1%40carlsonresearchsummer2026.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

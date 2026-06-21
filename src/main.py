@@ -21,6 +21,7 @@ from analysisPDF_v2_section import analysisPDF_v2
 from analysisPDF_v2_section import analysisPDF_v2_page
 from propublica_section import propublica_UI
 from propublica_cloud_section import propublica_cloud_UI
+from Spider_section import spider_UI
 # SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
@@ -29,13 +30,14 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 # ---------------------------------------------------------------------------------
 # MAIN UI -------------------------------------------------------------------------
 
+# UI pages
 def choice_menu():
     choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()
     return choice
 
 def main():
     main_page.show()
-    choice = questionary.select("Select terminal",choices=["Filter Data","LLM Analysis - PDF URL","LLM Analysis - Raw PDF","LLM Analysis V2","LLM Analysis V2 - Raw PDF","Propublica API","Propublica API [CLOUD]","Settings"]).ask()
+    choice = questionary.select("Select terminal",choices=["Filter Data","LLM Analysis - PDF URL","LLM Analysis - Raw PDF","LLM Analysis V2","LLM Analysis V2 - Raw PDF","Propublica API","Propublica API [CLOUD]","Spider","Settings"]).ask()
 
     if choice == "Filter Data":
         os.system("clear")
@@ -52,6 +54,9 @@ def main():
         propublica_UI.show()
     elif choice == "Propublica API [CLOUD]":
         propublica_cloud_UI.show()
+    elif choice == "Spider":
+        spider_UI.show()
+
     elif choice == "Settings":
         settings_page.show()
 
@@ -59,9 +64,6 @@ if __name__ == "__main__":
     main()
 
 # ---------------------------------------------------------------------------------
-
 # dowload version:
 # pyinstaller --onefile --add-data ".env:." src/main.py
-
-
 # test start in vs code terminal: /usr/local/bin/python3 /Users/smitheiamwattnasin/GitPage/DataProcessor/src/main.py

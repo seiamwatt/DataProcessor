@@ -1,0 +1,18 @@
+# 1. Make sure you're on main and up to date
+git checkout main
+git pull origin main
+
+# 2. Create a new branch for your work (use a descriptive name)
+git checkout -b my-change
+
+# 3. ... make your edits to files ...
+
+# 4. Stage and commit your changes
+git add .
+git commit -m "Describe what you changed"
+
+# 5. Push the branch to GitHub
+git push -u origin my-change
+
+# 6. Open the pull request
+gh pr create --base main --head my-change --title "My change" --body "What this does and why"

@@ -200,11 +200,3 @@ ProPublica API ──> orgs CSV ──> [Filter: download PDF + OCR + DeepSeek] 
 
 ---
 
-## 10. Notes, caveats & cleanup opportunities
-
-- **v1 vs v2 duplication.** `analysis_section` / `analysisPDF_section` (v1) and `analysis_v2_section` / `analysisPDF_v2_section` (v2) coexist, and both v1 menu entries are still wired into `main.py`. v2 (3-model coding) is the current engine; v1 appears to be superseded.
-- **Spider section is unfinished.** `Spider_section/spider.py` and `spider_UI.py` are scaffolding/stubs (commented-out crawler stages, empty functions) and not reachable from the menu.
-- **Hard-coded delays.** The filter step sleeps **30s after every PDF download** (`report_filter.extract_pdf_text`), which dominates runtime — verify this is intentional.
-- **No dependency manifest.** Add a `requirements.txt`/`pyproject.toml` to make the environment reproducible.
-- **Secrets.** `.env` is correctly gitignored; AWS creds rely on ambient configuration.
-- **Imports are heavy and duplicated** across UI modules (the full Rich import block is copy-pasted into most `*_page.py` files) — a shared UI helper module would reduce drift.

@@ -37,6 +37,23 @@ from propublica_section import propublica_logic
 
 console = Console()
 
+# THEME ---------------------------------------------------------------------------
+# Presentation-layer constants only. Edit these to retheme the whole application.
+ACCENT = "blue3"
+EMPHASIS = "bold white"
+MUTED = "grey62"
+OK = "green"
+WARN = "yellow"
+ERR = "bold red"
+
+PROMPT_STYLE = questionary.Style([
+    ("qmark", "fg:#0000d7 bold"),
+    ("question", "bold"),
+    ("answer", "fg:#0000d7"),
+    ("pointer", "fg:#0000d7 bold"),
+])
+# ---------------------------------------------------------------------------------
+
 
 def resource_path(relative_path):
     """Get path for bundled files (works for both dev and PyInstaller)"""
@@ -48,34 +65,73 @@ def resource_path(relative_path):
 load_dotenv(resource_path(".env"))
 
 
-def args_table() -> Table:
-    table = Table(title="[blue]Arguments Needed", border_style="bright_cyan")
-    table.add_column("[red]Args", no_wrap=True)
-    table.add_column("[red]Description", no_wrap=True)
-    table.add_column("[red]Required", no_wrap=True)
+def banner_panel() -> Panel:
+    """Application masthead."""
+    title = Text("PROPUBLICA NONPROFIT EXPLORER", style=f"bold {ACCENT}")
+    subtitle = Text("Nonprofit data collection pipeline \u2014 output to local CSV", style=MUTED)
+    meta = Text(datetime.now().strftime("Session started %Y-%m-%d %H:%M"), style=MUTED)
+    body = Group(
+        Align.center(title),
+        Align.center(subtitle),
+        Align.center(meta),
+    )
+    return Panel(
+        Padding(body, (1, 4)),
+        box=box.HEAVY,
+        border_style=ACCENT,
+    )
 
-    table.add_row("Input CSV", "existing CSV to append results", "False")
-    table.add_row("NTEE CODE category", "NTEE code 1-10", "True")
-    table.add_row("Num pages", "Number of pages to process", "True")
+
+def args_table() -> Table:
+    """Single reference table: parameter, description, required flag, default."""
+    table = Table(
+        title="Run parameters",
+        title_style=f"bold {ACCENT}",
+        title_justify="left",
+        box=box.SIMPLE_HEAVY,
+        border_style=MUTED,
+        header_style=f"bold {ACCENT}",
+        pad_edge=False,
+    )
+    table.add_column("Parameter", no_wrap=True, style=EMPHASIS)
+    table.add_column("Description")
+    table.add_column("Required", justify="center", no_wrap=True)
+    table.add_column("Default", no_wrap=True, style=MUTED)
+
+    table.add_row("Input CSV", "Existing CSV to append results, or a folder for a new file", "Yes", "\u2014")
+    table.add_row("NTEE category", "NTEE code category (1\u201310, see index)", "Yes", "\u2014")
+    table.add_row("Number of pages", "Pages to process per request", "Yes", "500")
+    table.add_row("Start state index", "First state index to process", "No", "0")
+    table.add_row("End state index", "Last state index to process", "No", "57")
     return table
 
+
 def propublica_index() -> Table:
-    table = Table(title="[blue]Processing Index", border_style="bright_cyan",show_lines=True)
-    table.add_column("Category ID", style="cyan", justify="center")
-    table.add_column("Category", style="white")
-    table.add_column("Letters", style="green", justify="center")
+    """Reference index of NTEE categories."""
+    table = Table(
+        title="NTEE category index",
+        title_style=f"bold {ACCENT}",
+        title_justify="left",
+        box=box.SIMPLE_HEAVY,
+        border_style=MUTED,
+        header_style=f"bold {ACCENT}",
+        pad_edge=False,
+    )
+    table.add_column("ID", justify="center", no_wrap=True, style=EMPHASIS)
+    table.add_column("Category")
+    table.add_column("Letters", justify="center", style=MUTED)
 
     categories = [
-        ("1",  "Arts, Culture & Humanities",    "A"),
-        ("2",  "Education",                     "B"),
-        ("3",  "Environment & Animals",         "C, D"),
-        ("4",  "Health",                        "E, F, G, H"),
-        ("5",  "Human Services",                "I, J, K, L, M, N, O, P"),
+        ("1",  "Arts, Culture & Humanities",     "A"),
+        ("2",  "Education",                      "B"),
+        ("3",  "Environment & Animals",          "C, D"),
+        ("4",  "Health",                         "E, F, G, H"),
+        ("5",  "Human Services",                 "I, J, K, L, M, N, O, P"),
         ("6",  "International, Foreign Affairs", "Q"),
-        ("7",  "Public, Societal Benefit",      "R, S, T, U, V, W"),
-        ("8",  "Religion Related",              "X"),
-        ("9",  "Mutual/Membership Benefit",     "Y"),
-        ("10", "Unknown, Unclassified",         "Z"),
+        ("7",  "Public, Societal Benefit",       "R, S, T, U, V, W"),
+        ("8",  "Religion Related",               "X"),
+        ("9",  "Mutual/Membership Benefit",      "Y"),
+        ("10", "Unknown, Unclassified",          "Z"),
     ]
 
     for cat_id, category, letters in categories:
@@ -83,86 +139,93 @@ def propublica_index() -> Table:
 
     return table
 
-def display_tables():
-    panel = Panel(
-        Columns(
-            [propublica_index(), args_table()],
-            equal=True,
-            expand=True,
-        ),
-        title="[bold bright_cyan]ProPublica Nonprofit Explorer",
-        subtitle="[dim]nonprofit data toolkit",
-        border_style="bright_cyan",
-        padding=(1, 2),
-    )
 
-    console.print(panel)
+def display_tables():
+    console.print(banner_panel())
+    console.print(Columns(
+        [propublica_index(), args_table()],
+        equal=True,
+        expand=True,
+    ))
+    console.print()
+
+
+def run_summary_panel(rows_appended: int, output_path: str) -> Panel:
+    """Final report card for the completed run."""
+    table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
+    table.add_column(style=MUTED, no_wrap=True)
+    table.add_column(style=EMPHASIS)
+    table.add_row("Rows appended", f"{rows_appended:,}")
+    table.add_row("Output file", output_path)
+    return Panel(table, title=Text("Run complete", style=f"bold {OK}"),
+                 title_align="left", border_style=OK, box=box.ROUNDED)
 
 
 def show():
 
     # console.print(args_table())
 
+    console.clear()
     display_tables()
 
 
     status = True
 
     while status:
-        console.print(Rule("[bold blue]New Session[/bold blue]"))
+        console.print(Rule("Configuration", style=ACCENT))
         input_valid = False
 
         while not input_valid:
             try:
-                input_csv_path = questionary.path("Input CSV file (or drag a folder path in):").ask()
+                input_csv_path = questionary.path("Input CSV file (or drag a folder path in):", style=PROMPT_STYLE).ask()
                 input_csv_path = input_csv_path.strip("'\"")
 
                 if os.path.isfile(input_csv_path):
                     df = propublica_logic.load_csv(input_csv_path)
-                    console.print(f"[green]Loaded existing CSV: {input_csv_path}")
+                    console.print(f"[{MUTED}]Loaded existing CSV: {input_csv_path}[/]")
                 elif os.path.isdir(input_csv_path):
                     input_csv_path = os.path.join(input_csv_path, "output.csv")
-                    console.print(f"[yellow]Will create new file: {input_csv_path}")
+                    console.print(f"[{MUTED}]A new file will be created: {input_csv_path}[/]")
                 else:
-                    console.print("[bold red]Path is not a valid file or folder, try again")
+                    console.print(f"[{ERR}]Path is not a valid file or folder.[/] [{MUTED}]Provide an existing CSV file or a folder, then try again.[/]")
                     continue
-                ntee_code_catagory = questionary.text("NTEE code category 1-10").ask()
+                ntee_code_catagory = questionary.text("NTEE code category (1\u201310)", style=PROMPT_STYLE).ask()
                 # ntee_code = questionary.text("NTEE code (e.g. A01)").ask()
 
-                num_page = questionary.text("Number of pages to process",default="500").ask()
+                num_page = questionary.text("Number of pages to process", default="500", style=PROMPT_STYLE).ask()
                 num_page = int(num_page)
 
-                start_state_index = questionary.text("Start State Index",default="0").ask()
+                start_state_index = questionary.text("Start state index", default="0", style=PROMPT_STYLE).ask()
                 start_state_index = int(start_state_index)
 
-                end_state_index = questionary.text("End State Index",default="57").ask()
+                end_state_index = questionary.text("End state index", default="57", style=PROMPT_STYLE).ask()
                 end_state_index = int(end_state_index)
 
                 input_valid = True
             except Exception as e:
-                console.print("[bold red]Invalid input")
+                console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Ensure numeric fields contain whole numbers, then try again.[/]")
 
-        console.print("[bold cyan]Processing Data")
+        console.print(Rule("Processing", style=ACCENT))
 
-        results = propublica_logic.populate_data(
-            num_pages=num_page,
-            ntee_catagory_id=ntee_code_catagory,
-            start_state_index=start_state_index,
-            end_state_index=end_state_index
-        )
+        with console.status(f"[{ACCENT}]Collecting data from ProPublica...", spinner="dots"):
+            results = propublica_logic.populate_data(
+                num_pages=num_page,
+                ntee_catagory_id=ntee_code_catagory,
+                start_state_index=start_state_index,
+                end_state_index=end_state_index
+            )
 
         if results:
             df = pd.DataFrame(results)
             file_exists = os.path.isfile(input_csv_path)
             df.to_csv(input_csv_path, mode="a", header=not file_exists, index=False)
-            console.print(f"[bold green]{len(results)} results appended to {input_csv_path}")
+            console.print(run_summary_panel(len(results), input_csv_path))
         else:
-            console.print("[bold yellow]No results found")
+            console.print(f"[{WARN}]No results were found for this configuration.[/] [{MUTED}]Nothing was written to the file.[/]")
 
-        console.print("[bold cyan]End of processing")
-
-        run_again = questionary.confirm("Repeat processing?").ask()
+        run_again = questionary.confirm("Repeat processing?", style=PROMPT_STYLE).ask()
         if not run_again:
+            console.print(f"[{MUTED}]Session ended.[/]")
             status = False
 
 

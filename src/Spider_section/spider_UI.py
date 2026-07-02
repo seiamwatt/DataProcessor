@@ -1,208 +1,445 @@
-import time
-import random
-import platform
-from datetime import datetime, timedelta
-from collections import deque
-import questionary
+"""Spider — Nonprofit Report Crawler
+Terminal UI (rich + questionary)
+
+Interactive:      python spider_ui.py
+Non-interactive:  python spider_ui.py --csv orgs.csv --out ./reports --sources 990,wayback,live
+"""
+
 import argparse
-from rich.console import Console
-from rich.layout import Layout
-from rich.live import Live
-from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
-from rich.table import Table
-from rich.text import Text
-from rich.align import Align
-from rich import box
-from rich.rule import Rule
-from rich.padding import Padding
-from rich.console import Group
-from rich.columns import Columns
-from dotenv import load_dotenv
 import os
 import sys
-import uuid
-import boto3
-import pytz
-import pandas as pd
+import time
+from datetime import timedelta
+
+import questionary
+from questionary import Choice, Style, Validator, ValidationError
+from rich import box
+from rich.align import Align
+from rich.columns import Columns
+from rich.console import Console, Group
+from rich.live import Live
+from rich.padding import Padding
+from rich.panel import Panel
+from rich.rule import Rule
+from rich.table import Table
+from rich.text import Text
+from dotenv import load_dotenv
 
 from Spider_section import spider
 
 console = Console()
 
+# ---------------------------------------------------------------- theme ---
 
-def resource_path(relative_path):
-    """Get path for bundled files (works for both dev and PyInstaller)"""
+ACCENT = "spring_green3"        # spider green — the one loud color
+ACCENT_DIM = "green4"
+INK = "grey85"
+MUTED = "grey50"
+DANGER = "red3"
+WARN = "gold3"
+
+Q_STYLE = Style(
+    [
+        ("qmark", "fg:#00af5f bold"),
+        ("question", "bold"),
+        ("answer", "fg:#00af5f bold"),
+        ("pointer", "fg:#00af5f bold"),
+        ("highlighted", "fg:#00af5f"),
+        ("selected", "fg:#00af5f"),
+        ("instruction", "fg:#666666"),
+    ]
+)
+
+SOURCES = {
+    "990": ("IRS Form 990 filings", "ProPublica, back to 2001"),
+    "wayback": ("Archived report PDFs", "Internet Archive snapshots"),
+    "live": ("Current report PDFs", "BFS crawl of the live site"),
+}
+
+# ------------------------------------------------------------- utilities ---
+
+
+def resource_path(relative_path: str) -> str:
+    """Path for bundled files (dev and PyInstaller)."""
     if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
 
 
-load_dotenv(resource_path(".env"))
-
-
 def clean_path(raw: str) -> str:
-    """Normalize a path from typing or macOS drag-and-drop.
-
-    Handles surrounding quotes, a trailing space, backslash-escaped spaces,
-    and a leading ~.
-    """
-    if raw is None:
+    """Normalize typed or drag-and-dropped paths (quotes, escaped spaces, ~)."""
+    if not raw:
         return ""
-    p = raw.strip().strip("'\"").strip()   # outer whitespace, then quotes, then any leftover space
-    p = p.replace("\\ ", " ")              # un-escape drag-and-drop spaces
+    p = raw.strip().strip("'\"").strip()
+    p = p.replace("\\ ", " ")
     return os.path.expanduser(p)
 
 
-def banner_panel() -> Panel:
-    art = """[bright_green]
- ██████ █████  ██████ █████  ██████ █████ 
- ███    ██  ██   ██   ██  ██ ██     ██  ██
-    ███ █████    ██   ██  ██ ████   █████ 
- ██████ ██     ██████ █████  ██████ ██  ██
-"""
-    return Panel(art, subtitle="[green]🕷  spider", highlight=True)
+def fmt_duration(seconds: float) -> str:
+    return str(timedelta(seconds=int(seconds)))
 
 
-def args_table() -> Table:
-    table = Table(title="[blue]Arguments Needed", border_style="bright_cyan")
-    table.add_column("[red]Args", no_wrap=True)
-    table.add_column("[red]Description", no_wrap=True)
-    table.add_column("[red]Required", no_wrap=True)
-
-    table.add_row("Org CSV", "list of orgs: name,domain,ein", "True")
-    table.add_row("Output folder", "where PDFs + manifest are saved", "True")
-    table.add_row("Sources", "990 / wayback / live", "True")
-    table.add_row("Years", "lookback window (default 20)", "False")
-    table.add_row("Depth", "live-crawl link depth (default 3)", "False")
-    table.add_row("Start Row", "start row index", "True")
-    table.add_row("End Row", "end row index", "True")
-    return table
+# ------------------------------------------------------------ validators ---
 
 
-def sources_index() -> Table:
-    table = Table(title="[blue]Sources", border_style="bright_cyan", show_lines=True)
-    table.add_column("ID", style="cyan", justify="center")
-    table.add_column("Source", style="white")
-    table.add_column("What it pulls", style="green")
+class CsvFileValidator(Validator):
+    """Path must exist, be a file, and look like a CSV."""
 
-    sources = [
-        ("1", "990",     "IRS Form 990 financial filings (ProPublica, back to 2001)"),
-        ("2", "wayback", "Historical report PDFs since removed (Internet Archive)"),
-        ("3", "live",    "Current report PDFs (site crawl, BFS)"),
-    ]
-    for sid, source, desc in sources:
-        table.add_row(sid, source, desc)
-
-    return table
+    def validate(self, document):
+        p = clean_path(document.text)
+        if not p:
+            raise ValidationError(message="Enter a path (or drag a file in)")
+        if not os.path.exists(p):
+            raise ValidationError(message=f"No such file: {p}")
+        if not os.path.isfile(p):
+            raise ValidationError(message="That's a folder — point to the CSV file")
+        if not p.lower().endswith((".csv", ".tsv")):
+            raise ValidationError(message="Expected a .csv file")
 
 
-def display_tables():
-    panel = Panel(
-        Columns(
-            [sources_index(), args_table()],
-            equal=True,
-            expand=True,
-        ),
-        title="[bold bright_cyan]Spider — Nonprofit Report Crawler",
-        subtitle="[dim]nonprofit data toolkit",
-        border_style="bright_cyan",
+class IntValidator(Validator):
+    """Integer within optional bounds."""
+
+    def __init__(self, lo=None, hi=None):
+        self.lo, self.hi = lo, hi
+
+    def validate(self, document):
+        try:
+            v = int(document.text)
+        except ValueError:
+            raise ValidationError(message="Whole numbers only")
+        if self.lo is not None and v < self.lo:
+            raise ValidationError(message=f"Must be ≥ {self.lo}")
+        if self.hi is not None and v > self.hi:
+            raise ValidationError(message=f"Must be ≤ {self.hi}")
+
+
+# ----------------------------------------------------------------- views ---
+
+
+def banner() -> Panel:
+    art = Text(
+        "\n"
+        " ██████ █████  ██████ █████  ██████ █████ \n"
+        " ███    ██  ██   ██   ██  ██ ██     ██  ██\n"
+        "    ███ █████    ██   ██  ██ ████   █████ \n"
+        " ██████ ██     ██████ █████  ██████ ██  ██\n",
+        style=f"bold {ACCENT}",
+    )
+    sub = Text("nonprofit report crawler", style=MUTED, justify="center")
+    return Panel(
+        Group(Align.center(art), Align.center(sub)),
+        box=box.HEAVY,
+        border_style=ACCENT_DIM,
+        subtitle=f"[{MUTED}]🕷  spider[/]",
+        padding=(0, 2),
+    )
+
+
+def sources_table() -> Table:
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, title="Sources", title_style=f"bold {INK}", expand=True)
+    t.add_column("id", style=f"bold {ACCENT}", no_wrap=True)
+    t.add_column("pulls", style=INK)
+    t.add_column("from", style=MUTED)
+    for sid, (what, where) in SOURCES.items():
+        t.add_row(sid, what, where)
+    return t
+
+
+def inputs_table() -> Table:
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, title="You'll be asked for", title_style=f"bold {INK}", expand=True)
+    t.add_column("input", style=f"bold {INK}", no_wrap=True)
+    t.add_column("notes", style=MUTED)
+    t.add_row("Org CSV", "columns: name, domain, ein")
+    t.add_row("Output folder", "PDFs + manifest.csv land here")
+    t.add_row("Sources", "any combination of the three")
+    t.add_row("Years / depth", "defaults: 20 / 3")
+    t.add_row("Row range", "slice of the CSV to process")
+    return t
+
+
+def intro():
+    console.print(banner())
+    console.print(
+        Panel(
+            Columns([sources_table(), inputs_table()], equal=True, expand=True),
+            box=box.ROUNDED,
+            border_style=ACCENT_DIM,
+            padding=(1, 2),
+        )
+    )
+
+
+def config_panel(cfg: dict, n_orgs: int) -> Panel:
+    t = Table(box=None, show_header=False, pad_edge=False)
+    t.add_column(style=MUTED, justify="right", no_wrap=True)
+    t.add_column(style=INK)
+
+    src_badges = Text()
+    for i, s in enumerate(cfg["sources"]):
+        if i:
+            src_badges.append("  ")
+        src_badges.append(f" {s} ", style=f"black on {ACCENT}")
+
+    n_selected = cfg["end_row"] - cfg["start_row"]
+    t.add_row("org csv", cfg["org_csv_path"])
+    t.add_row("orgs", f"{n_selected} of {n_orgs}  (rows {cfg['start_row']}–{cfg['end_row']})")
+    t.add_row("output", os.path.abspath(cfg["out_dir"]))
+    t.add_row("sources", src_badges)
+    t.add_row("lookback", f"{cfg['years']} years")
+    t.add_row("crawl depth", str(cfg["depth"]))
+
+    return Panel(
+        t,
+        title=f"[bold {INK}]Run configuration[/]",
+        border_style=ACCENT_DIM,
+        box=box.ROUNDED,
         padding=(1, 2),
     )
 
-    console.print(panel)
+
+def running_panel(cfg: dict, started: float) -> Panel:
+    n = cfg["end_row"] - cfg["start_row"]
+    body = Table(box=None, show_header=False, pad_edge=False)
+    body.add_column(style=MUTED, justify="right", no_wrap=True)
+    body.add_column(style=INK)
+    body.add_row("status", Text("crawling…", style=f"bold {ACCENT}"))
+    body.add_row("orgs", f"{n}  (rows {cfg['start_row']}–{cfg['end_row']})")
+    body.add_row("sources", " · ".join(cfg["sources"]))
+    body.add_row("elapsed", fmt_duration(time.monotonic() - started))
+    return Panel(body, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]🕷  spider running[/]", padding=(1, 2))
+
+
+def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
+    if manifest is None or len(manifest) == 0:
+        body = Group(
+            Text("No documents found", style=f"bold {WARN}"),
+            Text("Try widening the year lookback or adding sources.", style=MUTED),
+        )
+        return Panel(body, border_style=WARN, box=box.ROUNDED, title=f"[bold {WARN}]Finished — empty[/]", padding=(1, 2))
+
+    lines = Table(box=None, show_header=False, pad_edge=False)
+    lines.add_column(style=MUTED, justify="right", no_wrap=True)
+    lines.add_column(style=INK)
+    lines.add_row("documents", Text(str(len(manifest)), style=f"bold {ACCENT}"))
+    lines.add_row("elapsed", fmt_duration(elapsed))
+    lines.add_row("manifest", os.path.join(os.path.abspath(cfg["out_dir"]), "manifest.csv"))
+
+    # Per-source breakdown if the manifest exposes it
+    try:
+        counts = manifest["source"].value_counts()
+        breakdown = Text()
+        for i, (src, cnt) in enumerate(counts.items()):
+            if i:
+                breakdown.append("   ")
+            breakdown.append(f"{src} ", style=f"bold {ACCENT}")
+            breakdown.append(str(cnt), style=INK)
+        lines.add_row("by source", breakdown)
+    except Exception:
+        pass
+
+    return Panel(lines, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]✓ Finished[/]", padding=(1, 2))
+
+
+# ---------------------------------------------------------------- wizard ---
+
+
+def ask_config() -> dict | None:
+    """Interactive wizard. Returns config dict, or None if cancelled."""
+
+    # Org CSV — validated inline, no retry loop needed
+    raw = questionary.path(
+        "Org list CSV (or drag a file in):",
+        validate=CsvFileValidator(),
+        style=Q_STYLE,
+    ).ask()
+    if raw is None:
+        return None
+    org_csv_path = clean_path(raw)
+
+    try:
+        orgs_df = spider.load_csv(org_csv_path)
+    except Exception as e:
+        console.print(f"[bold {DANGER}]Couldn't read CSV:[/] {e!r}")
+        return None
+    if len(orgs_df) == 0:
+        console.print(f"[bold {WARN}]That CSV has no rows.[/]")
+        return None
+    console.print(f"  [{ACCENT}]✓[/] loaded [bold]{len(orgs_df)}[/] orgs\n")
+
+    # Output folder
+    out_raw = questionary.path("Output folder for PDFs + manifest:", default="./reports", style=Q_STYLE).ask()
+    if out_raw is None:
+        return None
+    out_dir = clean_path(out_raw) or "./reports"
+    if os.path.exists(out_dir) and not os.path.isdir(out_dir):
+        console.print(f"[bold {DANGER}]{out_dir} exists and is not a folder.[/]")
+        return None
+
+    # Sources
+    sources = questionary.checkbox(
+        "Sources to run:",
+        choices=[
+            Choice(f"990 — {SOURCES['990'][0]}", value="990", checked=True),
+            Choice(f"wayback — {SOURCES['wayback'][0]}", value="wayback", checked=True),
+            Choice(f"live — {SOURCES['live'][0]}", value="live", checked=True),
+        ],
+        validate=lambda picked: True if picked else "Pick at least one source",
+        style=Q_STYLE,
+    ).ask()
+    if sources is None:
+        return None
+
+    # Numbers — each validated inline, bounds-checked against the CSV
+    years = questionary.text("Years lookback:", default="20", validate=IntValidator(lo=1, hi=100), style=Q_STYLE).ask()
+    if years is None:
+        return None
+    depth = questionary.text("Live-crawl depth:", default="3", validate=IntValidator(lo=0, hi=10), style=Q_STYLE).ask()
+    if depth is None:
+        return None
+    start_row = questionary.text(
+        "Start row:", default="0", validate=IntValidator(lo=0, hi=len(orgs_df) - 1), style=Q_STYLE
+    ).ask()
+    if start_row is None:
+        return None
+    end_row = questionary.text(
+        "End row:",
+        default=str(len(orgs_df)),
+        validate=IntValidator(lo=int(start_row) + 1, hi=len(orgs_df)),
+        style=Q_STYLE,
+    ).ask()
+    if end_row is None:
+        return None
+
+    return {
+        "org_csv_path": org_csv_path,
+        "orgs_df": orgs_df,
+        "out_dir": out_dir,
+        "sources": sources,
+        "years": int(years),
+        "depth": int(depth),
+        "start_row": int(start_row),
+        "end_row": int(end_row),
+    }
+
+
+# ------------------------------------------------------------------- run ---
+
+
+def run_crawl(cfg: dict):
+    os.makedirs(cfg["out_dir"], exist_ok=True)
+    started = time.monotonic()
+
+    # Live status card with an elapsed clock while the spider works.
+    # (populate_data blocks, so we refresh the clock from the render callable.)
+    with Live(running_panel(cfg, started), console=console, refresh_per_second=2) as live:
+        import threading
+
+        stop = threading.Event()
+
+        def tick():
+            while not stop.is_set():
+                live.update(running_panel(cfg, started))
+                stop.wait(0.5)
+
+        t = threading.Thread(target=tick, daemon=True)
+        t.start()
+        try:
+            manifest = spider.populate_data(
+                orgs_df=cfg["orgs_df"],
+                out_dir=cfg["out_dir"],
+                sources=cfg["sources"],
+                years=cfg["years"],
+                depth=cfg["depth"],
+                start_row=cfg["start_row"],
+                end_row=cfg["end_row"],
+            )
+        finally:
+            stop.set()
+            t.join(timeout=1)
+
+    elapsed = time.monotonic() - started
+    console.print(results_panel(manifest, cfg, elapsed))
+
+
+# ------------------------------------------------------------------ main ---
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Spider — nonprofit report crawler")
+    p.add_argument("--csv", help="org list CSV (name,domain,ein)")
+    p.add_argument("--out", default="./reports", help="output folder")
+    p.add_argument("--sources", help="comma-separated: 990,wayback,live")
+    p.add_argument("--years", type=int, default=20)
+    p.add_argument("--depth", type=int, default=3)
+    p.add_argument("--start-row", type=int, default=0)
+    p.add_argument("--end-row", type=int, default=None)
+    return p.parse_args()
 
 
 def show():
-    console.print(banner_panel())
-    display_tables()
+    load_dotenv(resource_path(".env"))
+    args = parse_args()
 
-    status = True
+    # ---- non-interactive mode: all required flags present -----------------
+    if args.csv and args.sources:
+        csv_path = clean_path(args.csv)
+        if not os.path.isfile(csv_path):
+            console.print(f"[bold {DANGER}]Not a file:[/] {csv_path}")
+            sys.exit(1)
+        sources = [s.strip() for s in args.sources.split(",") if s.strip()]
+        bad = [s for s in sources if s not in SOURCES]
+        if bad:
+            console.print(f"[bold {DANGER}]Unknown source(s):[/] {', '.join(bad)} — valid: {', '.join(SOURCES)}")
+            sys.exit(1)
+        orgs_df = spider.load_csv(csv_path)
+        cfg = {
+            "org_csv_path": csv_path,
+            "orgs_df": orgs_df,
+            "out_dir": clean_path(args.out) or "./reports",
+            "sources": sources,
+            "years": args.years,
+            "depth": args.depth,
+            "start_row": max(0, args.start_row),
+            "end_row": min(len(orgs_df), args.end_row) if args.end_row else len(orgs_df),
+        }
+        console.print(banner())
+        console.print(config_panel(cfg, len(orgs_df)))
+        run_crawl(cfg)
+        return
 
-    while status:
-        console.print(Rule("[bold blue]New Session[/bold blue]"))
-        input_valid = False
+    # ---- interactive mode --------------------------------------------------
+    intro()
+    while True:
+        console.print(Rule(f"[bold {ACCENT}]new session[/]", style=ACCENT_DIM))
 
-        while not input_valid:
-            # --- org list CSV (name, domain, ein) ---
-            raw = questionary.path("Org list CSV (or drag a file in):").ask()
-            if raw is None:                       # Ctrl+C / Esc cancels
-                return
-            org_csv_path = clean_path(raw)
+        cfg = ask_config()
+        if cfg is None:
+            console.print(f"[{MUTED}]Cancelled.[/]")
+            break
 
-            if not os.path.isfile(org_csv_path):
-                console.print(f"[bold red]Not a file: {org_csv_path!r} — try again")
+        # Review before committing
+        console.print()
+        console.print(config_panel(cfg, len(cfg["orgs_df"])))
+        go = questionary.confirm("Start crawling with this configuration?", default=True, style=Q_STYLE).ask()
+        if not go:
+            retry = questionary.confirm("Re-enter the settings?", default=True, style=Q_STYLE).ask()
+            if retry:
                 continue
+            break
 
-            try:
-                orgs_df = spider.load_csv(org_csv_path)
-            except Exception as e:
-                console.print(f"[bold red]Couldn't read CSV: {e!r}")
-                continue
-            console.print(f"[green]Loaded {len(orgs_df)} orgs from {org_csv_path}")
+        run_crawl(cfg)
 
-            # --- output folder for PDFs + manifest ---
-            out_raw = questionary.path("Output folder for PDFs + manifest:", default="./reports").ask()
-            out_dir = clean_path(out_raw) or "./reports"
+        again = questionary.confirm("Run another session?", default=False, style=Q_STYLE).ask()
+        if not again:
+            break
 
-            # --- which sources to run ---
-            sources = questionary.checkbox(
-                "Sources to run:",
-                choices=[
-                    questionary.Choice("990 — IRS Form 990 (ProPublica)", value="990", checked=True),
-                    questionary.Choice("wayback — archived report PDFs", value="wayback", checked=True),
-                    questionary.Choice("live — crawl current site", value="live", checked=True),
-                ],
-            ).ask()
-            if not sources:
-                console.print("[bold red]Pick at least one source, try again")
-                continue
-
-            # --- numeric inputs (validated on their own so a bad number
-            #     doesn't bounce you all the way back to the path prompt) ---
-            try:
-                years = int(questionary.text("Years lookback", default="20").ask())
-                depth = int(questionary.text("Live-crawl depth", default="3").ask())
-                start_row = int(questionary.text("Start Row index", default="0").ask())
-                end_row = int(questionary.text("End Row index", default=str(len(orgs_df))).ask())
-            except (TypeError, ValueError) as e:
-                console.print(f"[bold red]Numbers only for years/depth/rows: {e!r}")
-                continue
-
-            input_valid = True
-
-        console.print("[bold cyan]Crawling Data")
-
-        with console.status("[bold cyan]Running spider…", spinner="dots"):
-            manifest = spider.populate_data(
-                orgs_df=orgs_df,
-                out_dir=out_dir,
-                sources=sources,
-                years=years,
-                depth=depth,
-                start_row=start_row,
-                end_row=end_row,
-            )
-
-        if manifest is not None and len(manifest):
-            console.print(
-                f"[bold green]{len(manifest)} documents collected -> {os.path.join(out_dir, 'manifest.csv')}"
-            )
-        else:
-            console.print("[bold yellow]No documents found")
-
-        console.print("[bold cyan]End of processing")
-
-        run_again = questionary.confirm("Repeat processing?").ask()
-        if not run_again:
-            status = False
+    console.print(f"[{MUTED}]bye 🕷[/]")
 
 
 if __name__ == "__main__":
-    show()
+    try:
+        main()
+    except KeyboardInterrupt:
+        console.print(f"\n[{MUTED}]Interrupted — nothing more written. bye 🕷[/]")
+        sys.exit(130)

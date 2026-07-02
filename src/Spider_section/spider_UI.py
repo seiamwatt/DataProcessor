@@ -31,8 +31,8 @@ console = Console()
 
 # ---------------------------------------------------------------- theme ---
 
-ACCENT = "spring_green3"        # spider green — the one loud color
-ACCENT_DIM = "green4"
+ACCENT = "dark_orange"          # spider orange — the one loud color
+ACCENT_DIM = "dark_orange3"
 INK = "grey85"
 MUTED = "grey50"
 DANGER = "red3"
@@ -40,12 +40,12 @@ WARN = "gold3"
 
 Q_STYLE = Style(
     [
-        ("qmark", "fg:#00af5f bold"),
+        ("qmark", "fg:#ff8700 bold"),
         ("question", "bold"),
-        ("answer", "fg:#00af5f bold"),
-        ("pointer", "fg:#00af5f bold"),
-        ("highlighted", "fg:#00af5f"),
-        ("selected", "fg:#00af5f"),
+        ("answer", "fg:#ff8700 bold"),
+        ("pointer", "fg:#ff8700 bold"),
+        ("highlighted", "fg:#ff8700"),
+        ("selected", "fg:#ff8700"),
         ("instruction", "fg:#666666"),
     ]
 )
@@ -88,11 +88,11 @@ class CsvFileValidator(Validator):
     def validate(self, document):
         p = clean_path(document.text)
         if not p:
-            raise ValidationError(message="Enter a path (or drag a file in)")
+            raise ValidationError(message="Enter a path, or drag a file into the terminal")
         if not os.path.exists(p):
             raise ValidationError(message=f"No such file: {p}")
         if not os.path.isfile(p):
-            raise ValidationError(message="That's a folder — point to the CSV file")
+            raise ValidationError(message="The path is a folder. Provide the CSV file itself")
         if not p.lower().endswith((".csv", ".tsv")):
             raise ValidationError(message="Expected a .csv file")
 
@@ -107,11 +107,11 @@ class IntValidator(Validator):
         try:
             v = int(document.text)
         except ValueError:
-            raise ValidationError(message="Whole numbers only")
+            raise ValidationError(message="Enter a whole number")
         if self.lo is not None and v < self.lo:
-            raise ValidationError(message=f"Must be ≥ {self.lo}")
+            raise ValidationError(message=f"Must be at least {self.lo}")
         if self.hi is not None and v > self.hi:
-            raise ValidationError(message=f"Must be ≤ {self.hi}")
+            raise ValidationError(message=f"Must not exceed {self.hi}")
 
 
 # ----------------------------------------------------------------- views ---
@@ -126,35 +126,35 @@ def banner() -> Panel:
         " ██████ ██     ██████ █████  ██████ ██  ██\n",
         style=f"bold {ACCENT}",
     )
-    sub = Text("nonprofit report crawler", style=MUTED, justify="center")
+    sub = Text("Nonprofit report crawler", style=MUTED, justify="center")
     return Panel(
         Group(Align.center(art), Align.center(sub)),
         box=box.HEAVY,
         border_style=ACCENT_DIM,
-        subtitle=f"[{MUTED}]🕷  spider[/]",
+        subtitle=f"[{MUTED}]Spider[/]",
         padding=(0, 2),
     )
 
 
 def sources_table() -> Table:
     t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, title="Sources", title_style=f"bold {INK}", expand=True)
-    t.add_column("id", style=f"bold {ACCENT}", no_wrap=True)
-    t.add_column("pulls", style=INK)
-    t.add_column("from", style=MUTED)
+    t.add_column("ID", style=f"bold {ACCENT}", no_wrap=True)
+    t.add_column("Retrieves", style=INK)
+    t.add_column("Source", style=MUTED)
     for sid, (what, where) in SOURCES.items():
         t.add_row(sid, what, where)
     return t
 
 
 def inputs_table() -> Table:
-    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, title="You'll be asked for", title_style=f"bold {INK}", expand=True)
-    t.add_column("input", style=f"bold {INK}", no_wrap=True)
-    t.add_column("notes", style=MUTED)
-    t.add_row("Org CSV", "columns: name, domain, ein")
-    t.add_row("Output folder", "PDFs + manifest.csv land here")
-    t.add_row("Sources", "any combination of the three")
-    t.add_row("Years / depth", "defaults: 20 / 3")
-    t.add_row("Row range", "slice of the CSV to process")
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, title="Required inputs", title_style=f"bold {INK}", expand=True)
+    t.add_column("Input", style=f"bold {INK}", no_wrap=True)
+    t.add_column("Notes", style=MUTED)
+    t.add_row("Org CSV", "Columns: name, domain, ein")
+    t.add_row("Output folder", "Destination for PDFs and manifest.csv")
+    t.add_row("Sources", "Any combination of the three sources")
+    t.add_row("Years / depth", "Defaults: 20 years, depth 3")
+    t.add_row("Row range", "Subset of CSV rows to process")
     return t
 
 
@@ -182,12 +182,12 @@ def config_panel(cfg: dict, n_orgs: int) -> Panel:
         src_badges.append(f" {s} ", style=f"black on {ACCENT}")
 
     n_selected = cfg["end_row"] - cfg["start_row"]
-    t.add_row("org csv", cfg["org_csv_path"])
-    t.add_row("orgs", f"{n_selected} of {n_orgs}  (rows {cfg['start_row']}–{cfg['end_row']})")
-    t.add_row("output", os.path.abspath(cfg["out_dir"]))
-    t.add_row("sources", src_badges)
-    t.add_row("lookback", f"{cfg['years']} years")
-    t.add_row("crawl depth", str(cfg["depth"]))
+    t.add_row("Org CSV", cfg["org_csv_path"])
+    t.add_row("Organizations", f"{n_selected} of {n_orgs}  (rows {cfg['start_row']}\u2013{cfg['end_row']})")
+    t.add_row("Output", os.path.abspath(cfg["out_dir"]))
+    t.add_row("Sources", src_badges)
+    t.add_row("Lookback", f"{cfg['years']} years")
+    t.add_row("Crawl depth", str(cfg["depth"]))
 
     return Panel(
         t,
@@ -203,27 +203,27 @@ def running_panel(cfg: dict, started: float) -> Panel:
     body = Table(box=None, show_header=False, pad_edge=False)
     body.add_column(style=MUTED, justify="right", no_wrap=True)
     body.add_column(style=INK)
-    body.add_row("status", Text("crawling…", style=f"bold {ACCENT}"))
-    body.add_row("orgs", f"{n}  (rows {cfg['start_row']}–{cfg['end_row']})")
-    body.add_row("sources", " · ".join(cfg["sources"]))
-    body.add_row("elapsed", fmt_duration(time.monotonic() - started))
-    return Panel(body, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]🕷  spider running[/]", padding=(1, 2))
+    body.add_row("Status", Text("Crawling in progress", style=f"bold {ACCENT}"))
+    body.add_row("Organizations", f"{n}  (rows {cfg['start_row']}\u2013{cfg['end_row']})")
+    body.add_row("Sources", " \u00b7 ".join(cfg["sources"]))
+    body.add_row("Elapsed", fmt_duration(time.monotonic() - started))
+    return Panel(body, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]Spider running[/]", padding=(1, 2))
 
 
 def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
     if manifest is None or len(manifest) == 0:
         body = Group(
-            Text("No documents found", style=f"bold {WARN}"),
-            Text("Try widening the year lookback or adding sources.", style=MUTED),
+            Text("No documents were found", style=f"bold {WARN}"),
+            Text("Consider widening the year lookback or adding sources.", style=MUTED),
         )
-        return Panel(body, border_style=WARN, box=box.ROUNDED, title=f"[bold {WARN}]Finished — empty[/]", padding=(1, 2))
+        return Panel(body, border_style=WARN, box=box.ROUNDED, title=f"[bold {WARN}]Finished \u2014 no results[/]", padding=(1, 2))
 
     lines = Table(box=None, show_header=False, pad_edge=False)
     lines.add_column(style=MUTED, justify="right", no_wrap=True)
     lines.add_column(style=INK)
-    lines.add_row("documents", Text(str(len(manifest)), style=f"bold {ACCENT}"))
-    lines.add_row("elapsed", fmt_duration(elapsed))
-    lines.add_row("manifest", os.path.join(os.path.abspath(cfg["out_dir"]), "manifest.csv"))
+    lines.add_row("Documents", Text(str(len(manifest)), style=f"bold {ACCENT}"))
+    lines.add_row("Elapsed", fmt_duration(elapsed))
+    lines.add_row("Manifest", os.path.join(os.path.abspath(cfg["out_dir"]), "manifest.csv"))
 
     # Per-source breakdown if the manifest exposes it
     try:
@@ -234,11 +234,11 @@ def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
                 breakdown.append("   ")
             breakdown.append(f"{src} ", style=f"bold {ACCENT}")
             breakdown.append(str(cnt), style=INK)
-        lines.add_row("by source", breakdown)
+        lines.add_row("By source", breakdown)
     except Exception:
         pass
 
-    return Panel(lines, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]✓ Finished[/]", padding=(1, 2))
+    return Panel(lines, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]Finished[/]", padding=(1, 2))
 
 
 # ---------------------------------------------------------------- wizard ---
@@ -260,15 +260,15 @@ def ask_config() -> dict | None:
     try:
         orgs_df = spider.load_csv(org_csv_path)
     except Exception as e:
-        console.print(f"[bold {DANGER}]Couldn't read CSV:[/] {e!r}")
+        console.print(f"[bold {DANGER}]Unable to read the CSV file:[/] {e!r}")
         return None
     if len(orgs_df) == 0:
-        console.print(f"[bold {WARN}]That CSV has no rows.[/]")
+        console.print(f"[bold {WARN}]The CSV file contains no rows.[/]")
         return None
-    console.print(f"  [{ACCENT}]✓[/] loaded [bold]{len(orgs_df)}[/] orgs\n")
+    console.print(f"  [{MUTED}]Loaded [bold]{len(orgs_df)}[/] organizations.[/]\n")
 
     # Output folder
-    out_raw = questionary.path("Output folder for PDFs + manifest:", default="./reports", style=Q_STYLE).ask()
+    out_raw = questionary.path("Output folder for PDFs and manifest:", default="./reports", style=Q_STYLE).ask()
     if out_raw is None:
         return None
     out_dir = clean_path(out_raw) or "./reports"
@@ -280,18 +280,18 @@ def ask_config() -> dict | None:
     sources = questionary.checkbox(
         "Sources to run:",
         choices=[
-            Choice(f"990 — {SOURCES['990'][0]}", value="990", checked=True),
-            Choice(f"wayback — {SOURCES['wayback'][0]}", value="wayback", checked=True),
-            Choice(f"live — {SOURCES['live'][0]}", value="live", checked=True),
+            Choice(f"990 \u2014 {SOURCES['990'][0]}", value="990", checked=True),
+            Choice(f"wayback \u2014 {SOURCES['wayback'][0]}", value="wayback", checked=True),
+            Choice(f"live \u2014 {SOURCES['live'][0]}", value="live", checked=True),
         ],
-        validate=lambda picked: True if picked else "Pick at least one source",
+        validate=lambda picked: True if picked else "Select at least one source",
         style=Q_STYLE,
     ).ask()
     if sources is None:
         return None
 
     # Numbers — each validated inline, bounds-checked against the CSV
-    years = questionary.text("Years lookback:", default="20", validate=IntValidator(lo=1, hi=100), style=Q_STYLE).ask()
+    years = questionary.text("Years of lookback:", default="20", validate=IntValidator(lo=1, hi=100), style=Q_STYLE).ask()
     if years is None:
         return None
     depth = questionary.text("Live-crawl depth:", default="3", validate=IntValidator(lo=0, hi=10), style=Q_STYLE).ask()
@@ -390,7 +390,7 @@ def show():
         sources = [s.strip() for s in args.sources.split(",") if s.strip()]
         bad = [s for s in sources if s not in SOURCES]
         if bad:
-            console.print(f"[bold {DANGER}]Unknown source(s):[/] {', '.join(bad)} — valid: {', '.join(SOURCES)}")
+            console.print(f"[bold {DANGER}]Unknown source(s):[/] {', '.join(bad)} \u2014 valid options: {', '.join(SOURCES)}")
             sys.exit(1)
         orgs_df = spider.load_csv(csv_path)
         cfg = {
@@ -411,7 +411,7 @@ def show():
     # ---- interactive mode --------------------------------------------------
     intro()
     while True:
-        console.print(Rule(f"[bold {ACCENT}]new session[/]", style=ACCENT_DIM))
+        console.print(Rule(f"[bold {ACCENT}]New session[/]", style=ACCENT_DIM))
 
         cfg = ask_config()
         if cfg is None:
@@ -434,12 +434,12 @@ def show():
         if not again:
             break
 
-    console.print(f"[{MUTED}]bye 🕷[/]")
+    console.print(f"[{MUTED}]Session ended.[/]")
 
 
 if __name__ == "__main__":
     try:
-        main()
+        show()
     except KeyboardInterrupt:
-        console.print(f"\n[{MUTED}]Interrupted — nothing more written. bye 🕷[/]")
+        console.print(f"\n[{MUTED}]Interrupted. No further data was written.[/]")
         sys.exit(130)

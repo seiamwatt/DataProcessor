@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from collections import deque
 import questionary
 import argparse
-from rich.console import Console
+from rich.console import Console, Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -15,6 +15,8 @@ from rich.progress import (
     SpinnerColumn,
     TextColumn,
     TimeElapsedColumn,
+    TimeRemainingColumn,
+    MofNCompleteColumn,
 )
 from rich.table import Table
 from rich.text import Text
@@ -22,26 +24,38 @@ from rich.align import Align
 from rich import box
 from rich.rule import Rule
 from rich.padding import Padding
-import questionary
-from dotenv import load_dotenv,find_dotenv
+from dotenv import load_dotenv, find_dotenv
 import os
 import pandas as pd
 import sys
-import time
-from rich.progress import Progress
 import uuid
 from rich.columns import Columns
 import boto3
 from botocore.exceptions import ClientError
-from datetime import datetime
 import pytz
-import os
 import glob
 
 from analysisPDF_v2_section import analysisPDF_v2
 
 console = Console()
 os.environ["TERM"] = "xterm-256color"
+
+# THEME ---------------------------------------------------------------------------
+# Presentation-layer constants only. Edit these to retheme the whole application.
+ACCENT = "cyan"
+EMPHASIS = "bold white"
+MUTED = "grey62"
+OK = "green"
+ERR = "bold red"
+
+PROMPT_STYLE = questionary.Style([
+    ("qmark", "fg:#00d7ff bold"),
+    ("question", "bold"),
+    ("answer", "fg:#00d7ff"),
+    ("pointer", "fg:#00d7ff bold"),
+])
+# ---------------------------------------------------------------------------------
+
 
 def resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
@@ -52,51 +66,66 @@ def resource_path(relative_path):
 load_dotenv(resource_path(".env"))
 
 
-# ── UI Panels ───────────────────────────────────────────────────────────────
+# -- UI Panels ----------------------------------------------------------------
 
 
 def banner_panel() -> Panel:
-    art = """[red]
-  ████  ██  ██  ████  ██    ██  ██ ████  █ ████  [blue] ████  █████  ████  ██████ █  ████  ██  ██
-[red] ██  ██ ███ ██ ██  ██ ██    ██  ██ ██    █ ██    [blue] ██    ██     ██      ██   █ ██  ██ ███ ██
-[red] █████  ██ ███ █████  ██     ████   ███  █  ███  [blue]  ███  ████   ██      ██   █ ██  ██ ██ ███
-[red] ██  ██ ██  ██ ██  ██ █████   ██   ████  █ ████  [blue] ████  █████  ████    ██   █  ████  ██  ██
-"""
-    return Panel(art, highlight=True, subtitle="[dim]PDF Annual Report Coding Pipeline[/dim]")
+    """Application masthead."""
+    title = Text("ANALYSIS SECTION \u2014 PDF V2", style=f"bold {ACCENT}")
+    subtitle = Text("PDF annual report coding pipeline", style=MUTED)
+    meta = Text(datetime.now().strftime("Session started %Y-%m-%d %H:%M"), style=MUTED)
+    body = Group(
+        Align.center(title),
+        Align.center(subtitle),
+        Align.center(meta),
+    )
+    return Panel(
+        Padding(body, (1, 4)),
+        box=box.HEAVY,
+        border_style=ACCENT,
+    )
 
 
 def args_table() -> Table:
-    table = Table(title="[blue]Arguments Needed", border_style="bright_cyan")
-    table.add_column("[red]Args", no_wrap=True)
-    table.add_column("[red]Description", no_wrap=True)
-    table.add_column("[red]Required", no_wrap=True)
+    """Single reference table: parameter, description, required flag, default."""
+    table = Table(
+        title="Run parameters",
+        title_style=f"bold {ACCENT}",
+        title_justify="left",
+        box=box.SIMPLE_HEAVY,
+        border_style=MUTED,
+        header_style=f"bold {ACCENT}",
+        pad_edge=False,
+    )
+    table.add_column("Parameter", no_wrap=True, style=EMPHASIS)
+    table.add_column("Description")
+    table.add_column("Required", justify="center", no_wrap=True)
+    table.add_column("Default", no_wrap=True, style=MUTED)
 
-    table.add_row("PDF directory", "Folder containing PDF files", "True")
-    table.add_row("Output CSV", "Output CSV file path", "True")
-    table.add_row("Start PDF", "Index of first PDF to process", "False")
-    table.add_row("End PDF", "Index of last PDF to process", "False")
-    table.add_row("Max pages", "Max pages to extract per PDF", "False")
-    return table
-
-
-def default_value_table() -> Table:
-    table = Table(title="[blue]Default Values", border_style="bright_cyan")
-    table.add_column("[red]Args", no_wrap=True)
-    table.add_column("[red]Default Value", no_wrap=True)
-
-    table.add_row("Start PDF", "0")
-    table.add_row("End PDF", "total PDFs found")
-    table.add_row("Max pages", "2000")
+    table.add_row("PDF directory", "Folder containing PDF files (searched recursively)", "Yes", "\u2014")
+    table.add_row("Output CSV", "Output CSV file path", "Yes", "\u2014")
+    table.add_row("Start PDF", "Index of the first PDF to process", "No", "0")
+    table.add_row("End PDF", "Index of the last PDF to process", "No", "Total PDFs found")
+    table.add_row("Max pages", "Maximum pages to extract per PDF", "No", "2000")
     return table
 
 
 def api_status_table(deep_ok: bool, gemini_ok: bool, gpt_ok: bool) -> Table:
-    table = Table(title="[blue]API Key Status", border_style="bright_cyan")
-    table.add_column("[red]Provider", no_wrap=True)
-    table.add_column("[red]Status", no_wrap=True)
+    """Environment check: one row per provider."""
+    table = Table(
+        title="Environment check",
+        title_style=f"bold {ACCENT}",
+        title_justify="left",
+        box=box.SIMPLE_HEAVY,
+        border_style=MUTED,
+        header_style=f"bold {ACCENT}",
+        pad_edge=False,
+    )
+    table.add_column("Provider", no_wrap=True, style=EMPHASIS)
+    table.add_column("API key", justify="center", no_wrap=True)
 
     def status(ok):
-        return "[bold green]✓ Found[/bold green]" if ok else "[bold red]✗ Missing[/bold red]"
+        return Text("Configured", style=OK) if ok else Text("Missing", style=ERR)
 
     table.add_row("DeepSeek", status(deep_ok))
     table.add_row("Gemini", status(gemini_ok))
@@ -104,40 +133,43 @@ def api_status_table(deep_ok: bool, gemini_ok: bool, gpt_ok: bool) -> Table:
     return table
 
 
-def processing_end_panel(total_pdfs: int, elapsed: float, output_path: str) -> Panel:
-    msg = (
-        f"[bold green]Processing complete![/bold green]\n"
-        f"[blue]PDFs processed:[/blue] {total_pdfs}\n"
-        f"[blue]Time elapsed:[/blue]   {elapsed:.1f}s\n"
-        f"[blue]Output saved:[/blue]   {output_path}"
-    )
-    return Panel(msg, title="[bold blue]Results", border_style="green")
+def processing_end_panel(total_pdfs: int, elapsed: float, output_path: str, run_id: str) -> Panel:
+    """Final report card for the completed run."""
+    mins, secs = divmod(int(elapsed), 60)
+    table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
+    table.add_column(style=MUTED, no_wrap=True)
+    table.add_column(style=EMPHASIS)
+    table.add_row("Run ID", run_id)
+    table.add_row("PDFs processed", f"{total_pdfs:,}")
+    table.add_row("Elapsed time", f"{mins}m {secs}s")
+    table.add_row("Output file", output_path)
+    return Panel(table, title=Text("Run complete", style=f"bold {OK}"),
+                 title_align="left", border_style=OK, box=box.ROUNDED)
 
 
-# ── Single PDF processor (with console output) ─────────────────────────────
+# -- Single PDF processor (with console output) --------------------------------
 def process_single_pdf(pdf_path, deep_key, gemini_key, gpt_key, max_pages):
     """Process one PDF through all three LLMs. Returns a result dict."""
 
     result_row = {"PDF": os.path.basename(pdf_path)}
 
     # extract text
-    print("  Extracting text...", end=" ")
     t0 = time.time()
     pdf_txt = analysisPDF_v2.extract_pdf_text(pdf_path, max_pages=max_pages)
     ext_time = time.time() - t0
 
     if pdf_txt is None:
-        print(f"FAILED ({ext_time:.1f}s)")
+        console.print(f"    [{ERR}]Text extraction failed[/] [{MUTED}]({ext_time:.1f}s)[/]")
         return result_row
 
-    print(f"{len(pdf_txt)} chars ({ext_time:.1f}s)")
+    console.print(f"    [{MUTED}]Text extracted \u2014 {len(pdf_txt):,} characters ({ext_time:.1f}s)[/]")
 
     prompt = analysisPDF_v2.create_prompt(
         pdf_filename=os.path.basename(pdf_path),
         pdf_text=pdf_txt,
     )
 
-    # ── LLM calls ───────────────────────────────────────────────────────
+    # -- LLM calls --------------------------------------------------------
     llm_calls = [
         ("DeepSeek", "ds", lambda: analysisPDF_v2.connect_to_DeepSeek(api_key=deep_key, prompt=prompt)),
         ("Gemini", "gm", lambda: analysisPDF_v2.connect_to_Gemini(api_key=gemini_key, prompt=prompt)),
@@ -145,31 +177,31 @@ def process_single_pdf(pdf_path, deep_key, gemini_key, gpt_key, max_pages):
     ]
 
     for display_name, prefix, call_fn in llm_calls:
-        print(f"  Calling {display_name}...", end=" ")
         output = call_fn()
 
         if output:
-            print("PASSED")
+            console.print(f"    {display_name}: [{OK}]Succeeded[/]")
             for field in analysisPDF_v2.JSON_FIELDS:
                 result_row[f"{prefix}_{field}"] = output.get(field, "")
         else:
-            print("FAILED")
+            console.print(f"    {display_name}: [{ERR}]Failed \u2014 recorded as parsing error[/]")
             for field in analysisPDF_v2.JSON_FIELDS:
                 result_row[f"{prefix}_{field}"] = "Parsing Error"
 
     return result_row
 
-# ── Main loop ──────────────────────────────────────────────────────────────
+# -- Main loop ------------------------------------------------------------------
 
 
 def show():
     status = True
 
+    console.clear()
     console.print(banner_panel())
-    console.print(Columns([args_table(), default_value_table()]))
+    console.print(args_table())
     console.print()
 
-    # ── Load API keys ───────────────────────────────────────────────────
+    # -- Load API keys ----------------------------------------------------
     deep_key = os.getenv("DeepSeek_key")
     gemini_key = os.getenv("Gemini_key")
     gpt_key = os.getenv("GPT_key")
@@ -192,35 +224,35 @@ def show():
         missing.append("GPT_key")
 
     if missing:
-        console.print(f"[bold red]Missing API keys in .env: {', '.join(missing)}[/bold red]")
+        console.print(f"[{ERR}]Missing API keys in .env: {', '.join(missing)}.[/] [{MUTED}]Add them and restart the application.[/]")
         return
 
-    # ── Session loop ────────────────────────────────────────────────────
+    # -- Session loop ------------------------------------------------------
     while status:
-        console.print(Rule("[bold blue]New Session[/bold blue]"))
+        console.print(Rule("Configuration", style=ACCENT))
         input_valid = False
 
         while not input_valid:
             try:
-                pdf_dir = questionary.path("PDF directory:").ask()
+                pdf_dir = questionary.path("PDF directory:", style=PROMPT_STYLE).ask()
                 if pdf_dir is None:
                     return
                 pdf_dir = pdf_dir.strip("'\"")
 
                 if not os.path.isdir(pdf_dir):
-                    console.print("[bold red]Directory not found.[/bold red]")
+                    console.print(f"[{ERR}]Directory not found.[/] [{MUTED}]Check the path and try again.[/]")
                     continue
 
                 pdf_files = sorted(
                     glob.glob(os.path.join(pdf_dir, "**", "*.pdf"), recursive=True)
                 )
                 if not pdf_files:
-                    console.print("[bold red]No PDFs found in that directory.[/bold red]")
+                    console.print(f"[{ERR}]No PDF files were found in that directory.[/]")
                     continue
 
-                console.print(f"[green]Found {len(pdf_files)} PDF(s)[/green]")
+                console.print(f"[{MUTED}]Found {len(pdf_files):,} PDF file(s).[/]")
 
-                output_path = questionary.path("Output CSV file:").ask()
+                output_path = questionary.path("Output CSV file:", style=PROMPT_STYLE).ask()
                 if output_path is None:
                     return
                 output_path = output_path.strip("'\"")
@@ -230,12 +262,12 @@ def show():
                     output_path = os.path.join(os.path.dirname(pdf_dir), output_path)
 
                 start_pdf_str = questionary.text(
-                    "Start PDF index", default="0"
+                    "Start PDF index", default="0", style=PROMPT_STYLE
                 ).ask()
                 start_pdf = int(start_pdf_str)
 
                 end_pdf_str = questionary.text(
-                    "End PDF index", default=str(len(pdf_files))
+                    "End PDF index", default=str(len(pdf_files)), style=PROMPT_STYLE
                 ).ask()
                 end_pdf = int(end_pdf_str)
 
@@ -244,7 +276,7 @@ def show():
                 end_pdf = max(start_pdf, min(end_pdf, len(pdf_files)))
 
                 max_pages_str = questionary.text(
-                    "Max pages per PDF", default="2000"
+                    "Max pages per PDF", default="2000", style=PROMPT_STYLE
                 ).ask()
                 max_pages = int(max_pages_str)
 
@@ -253,23 +285,33 @@ def show():
             except KeyboardInterrupt:
                 return
             except Exception:
-                console.print("[bold red]Invalid input, try again.[/bold red]")
+                console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Ensure numeric fields contain whole numbers, then try again.[/]")
 
-        # ── Processing ──────────────────────────────────────────────────
+        # -- Processing --------------------------------------------------
         pdf_subset = pdf_files[start_pdf:end_pdf]
         total = len(pdf_subset)
-        console.print(f"[bold red]Processing PDFs {start_pdf}–{end_pdf - 1} ({total} PDF(s))[/bold red]")
+        console.print(Rule("Processing", style=ACCENT))
+        console.print(f"[{MUTED}]Processing PDFs {start_pdf}\u2013{end_pdf - 1} ({total:,} file(s)).[/]")
         results = []
         time_start = time.time()
 
-        with Progress() as progress:
-            task = progress.add_task("[red]Analysing PDFs", total=total)
+        with Progress(
+            SpinnerColumn(style=ACCENT),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+            MofNCompleteColumn(),
+            TextColumn(f"[{MUTED}]files"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Analysing PDFs", total=total)
 
             for i, pdf_path in enumerate(pdf_subset, 1):
                 global_idx = start_pdf + i - 1
-               
 
-                print( f"[{global_idx}/{len(pdf_files)}] {os.path.basename(pdf_path)}")
+                progress.update(task, description=f"File {global_idx} of {len(pdf_files)}")
+                console.print(f"[{EMPHASIS}][{global_idx}/{len(pdf_files)}] {os.path.basename(pdf_path)}[/]")
 
                 row = process_single_pdf(
                     pdf_path=pdf_path,
@@ -286,25 +328,24 @@ def show():
                     output_path, mode="a", header=write_header, index=False
                 )
 
-                print(f"  [dim]Appended row {global_idx} → {output_path}[/dim]")
-                
+                console.print(f"    [{MUTED}]Row {global_idx} appended to {output_path}[/]")
 
                 progress.update(task, advance=1)
 
         time_elapsed = time.time() - time_start
         run_id = str(uuid.uuid4())[:8]
 
-        
-        console.print(processing_end_panel(total, time_elapsed, output_path))
-        console.print(f"[dim]Run ID: {run_id}[/dim]")
-        
 
-        # ── Continue or exit ────────────────────────────────────────────
-        exit_choice = questionary.confirm("Exit?").ask()
+        console.print(processing_end_panel(total, time_elapsed, output_path, run_id))
+
+
+        # -- Continue or exit ----------------------------------------------
+        exit_choice = questionary.confirm("Exit the application?", style=PROMPT_STYLE).ask()
         if exit_choice:
+            console.print(f"[{MUTED}]Session ended.[/]")
             status = False
 
-    
+
 
 
 if __name__ == "__main__":

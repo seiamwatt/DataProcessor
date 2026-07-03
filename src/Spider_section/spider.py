@@ -35,6 +35,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as dt
 import hashlib
 import json
@@ -428,15 +429,55 @@ class ContentSeen:
 # Content storage -- dated folders per org/source + a pandas manifest
 # ===========================================================================
 class ContentStorage:
+    # Union of every field either row shape can produce, so the streamed CSV
+    # has a stable header whether we're in links-only or download mode.
+    FIELDNAMES = ["org", "source", "year", "url", "saved_path", "bytes",
+                  "pages", "text_len", "scanned_or_ocr", "sha256", "collected_at"]
+
     def __init__(self, out_dir: str) -> None:
         self.out_dir = out_dir
         self.rows: list[dict] = []
         os.makedirs(out_dir, exist_ok=True)
+        self.manifest_csv = os.path.join(out_dir, "manifest.csv")
+        self._header_written = False
+        self._load_existing()
+
+    def _load_existing(self) -> None:
+        """Preload a prior manifest so a re-run resumes it (append lands in the
+        same file) instead of starting from an empty file that clobbers it."""
+        if not os.path.exists(self.manifest_csv) or os.path.getsize(self.manifest_csv) == 0:
+            return
+        try:
+            prev = pd.read_csv(self.manifest_csv, dtype={"ein": "string"})
+        except Exception as e:
+            log.warning("could not read existing manifest %s: %s", self.manifest_csv, e)
+            return
+        self.rows.extend(prev.to_dict("records"))
+        self._header_written = True   # file already has a header row
+
+    def _append_row(self, row: dict) -> None:
+        """Persist one row to manifest.csv right now, flushed to disk, so a
+        crash / disconnect mid-crawl keeps everything collected so far."""
+        self.rows.append(row)
+        try:
+            write_header = not self._header_written and (
+                not os.path.exists(self.manifest_csv)
+                or os.path.getsize(self.manifest_csv) == 0)
+            with open(self.manifest_csv, "a", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=self.FIELDNAMES, extrasaction="ignore")
+                if write_header:
+                    w.writeheader()
+                w.writerow(row)
+                f.flush()
+                os.fsync(f.fileno())
+            self._header_written = True
+        except Exception as e:
+            log.warning("could not append to manifest %s: %s", self.manifest_csv, e)
 
     def record_link(self, *, org: str, source: str, year, url: str) -> None:
         """Links-only mode: record the PDF's URL in the manifest without
-        downloading the file or writing anything to disk."""
-        self.rows.append({
+        downloading the file. The row is streamed to disk immediately."""
+        self._append_row({
             "org": org, "source": source, "year": year if year else "undated",
             "url": url, "collected_at": dt.datetime.now().isoformat(timespec="seconds"),
         })
@@ -462,7 +503,7 @@ class ContentStorage:
         with open(path, "wb") as f:
             f.write(data)
 
-        self.rows.append({
+        self._append_row({
             "org": org, "source": source, "year": year, "url": url,
             "saved_path": path, "bytes": len(data), "pages": n_pages,
             "text_len": text_len, "scanned_or_ocr": ocr_used,
@@ -472,15 +513,26 @@ class ContentStorage:
         return path
 
     def write_manifest(self) -> Optional[pd.DataFrame]:
+        """Final pass: rewrite the streamed manifest.csv as a clean, deduped,
+        sorted file (and the JSON view). self.rows already holds any prior
+        manifest plus everything appended this run, so we don't re-read disk."""
         if not self.rows:
             console.print("[yellow]No documents collected -- manifest is empty.[/yellow]")
             return None
+
         df = pd.DataFrame(self.rows)
+
+        # Rows re-collected across resumes can repeat; dedup on (org, source,
+        # url), keeping the latest so refreshed metadata wins.
+        key = [c for c in ("org", "source", "url") if c in df.columns]
+        if key:
+            df = df.drop_duplicates(subset=key, keep="last")
+
         # year mixes ints and "undated"; sort on a string view to avoid a
         # TypeError from pandas comparing int to str.
         df = df.sort_values(["org", "source", "year"],
                             key=lambda s: s.astype(str)).reset_index(drop=True)
-        df.to_csv(os.path.join(self.out_dir, "manifest.csv"), index=False)
+        df.to_csv(self.manifest_csv, index=False)
         df.to_json(os.path.join(self.out_dir, "manifest.json"),
                    orient="records", indent=2)
         return df

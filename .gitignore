@@ -1,1 +1,14 @@
+# Secrets — never commit these
 .env
+**/carlsonresearchsummer*.json
+**/*service-account*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+
+# macOS
+.DS_Store

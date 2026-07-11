@@ -1,6 +1,6 @@
 # DataProcessor — Project Documentation
 
-A terminal application for collecting U.S. nonprofit data and running large-language-model (LLM) analysis over the PDF annual reports those organizations publish. It is an interactive CLI built with [Rich](https://github.com/Textualize/rich) (styled output) and [questionary](https://github.com/tmbo/questionary) (prompts), packaged as a standalone executable with PyInstaller.
+A terminal application for collecting U.S. nonprofit data and running large-language-model (LLM) analysis over the PDF annual reports those organizations publish. It is an interactive CLI built with [Rich](https://github.com/Textualize/rich) (styled output) and [questionary](https://github.com/tmbo/questionary) (prompts), packaged with [uv](https://docs.astral.sh/uv/) as an installable command-line tool (`dataprocessor`).
 
 ---
 
@@ -30,9 +30,11 @@ Results are written to CSV progressively (one batch at a time, appended) and, fo
 | Cloud storage | `boto3` (AWS S3) |
 | Config | `python-dotenv` |
 | Timezones | `pytz` |
-| Packaging | `pyinstaller` |
+| BigQuery upload | `pandas-gbq` |
+| Web crawling | `beautifulsoup4`, `pypdf` |
+| Packaging | `uv` + `hatchling` |
 
-> ⚠️ There is **no `requirements.txt`** in the repo. The list above is derived from imports. Consider adding one.
+Dependencies are declared in `pyproject.toml` and pinned in `uv.lock` — `uv sync` reproduces the exact environment. OCR additionally requires the system packages **Tesseract** and **Ghostscript** (`brew install tesseract ghostscript`).
 
 ---
 
@@ -40,11 +42,13 @@ Results are written to CSV progressively (one batch at a time, appended) and, fo
 
 ```
 DataProcessor/
-├── main.spec / V1.1.0.spec      # PyInstaller build specs (bundle .env as data)
-├── .env                          # secrets + version (gitignored)
+├── pyproject.toml                # package metadata, dependencies, `dataprocessor` entry point
+├── uv.lock                       # pinned dependency versions (commit this)
+├── .env                          # API keys (gitignored — never commit)
 ├── output.csv                    # sample data
-└── src/
+└── src/dataprocessor/
     ├── main.py                   # ENTRY POINT — top-level menu / router
+    ├── config.py                 # load_env(): ~/.dataprocessor/.env, then nearest .env
     │
     ├── main_section/             # app shell
     │   ├── main_page.py          #   welcome screen, process overviews, LLM status
@@ -67,7 +71,9 @@ DataProcessor/
     ├── analysis_section/         # LEGACY v1 analysis (still wired into menu)
     ├── analysisPDF_section/      # LEGACY v1 raw-PDF analysis
     │
-    ├── Spider_section/           # UNFINISHED web crawler (stubs only)
+    ├── propublica_cloud_section/ # ProPublica collection with BigQuery output
+    │
+    ├── Spider_section/           # web crawler for PDF discovery
     │   ├── spider.py
     │   └── spider_UI.py
     │
@@ -84,7 +90,7 @@ Most features follow a **UI / logic split**:
 
 ## 4. How it runs
 
-### Entry point — `src/main.py`
+### Entry point — `src/dataprocessor/main.py`
 1. Imports every section module.
 2. `main_page.show()` prints the welcome banner, LLM token-cost table, process overviews, and live LLM status.
 3. A `questionary.select` menu routes to one section's `show()`:
@@ -97,6 +103,8 @@ Most features follow a **UI / logic split**:
 | LLM Analysis V2 | `analysis_v2_page` | **v2** 3-model analysis from PDF URLs |
 | LLM Analysis V2 - Raw PDF | `analysisPDF_v2_page` | **v2** 3-model analysis from local PDFs |
 | Propublica API | `propublica_UI` | Collect orgs from ProPublica |
+| Propublica API [CLOUD] | `propublica_cloud_UI` | Collect orgs, output to Google BigQuery |
+| Spider | `spider_UI` | Crawl sites to discover annual-report PDFs |
 | Settings | `settings_page` | View keys + connection status |
 
 Each section runs its own **interactive session loop** (`while status:`), asking to repeat or exit when a run finishes.
@@ -144,18 +152,25 @@ Displays the configured API keys and runs live connectivity tests (`main_util.De
 
 ## 6. Configuration
 
-Configuration is loaded from a **`.env`** file (gitignored, bundled into the executable via the `.spec` `datas=[('.env', '.')]` rule). `resource_path()` resolves it for both dev and PyInstaller (`sys._MEIPASS`) runs.
+Configuration is loaded by `dataprocessor/config.py::load_env()`, which reads **two locations in order**:
+
+1. `~/.dataprocessor/.env` — for people who installed the tool with `uv tool install` (no project folder needed).
+2. The nearest `.env` walking up from the current directory — for development, this finds the project-root `.env` (gitignored).
 
 Required variables:
 
 ```dotenv
-DeepSeek_key=...    # DeepSeek API key
-GPT_key=...         # OpenAI API key
-Gemini_key=...      # Google Gemini API key
-version=...         # version string shown in the UI
+DeepSeek_key=...                          # DeepSeek API key
+GPT_key=...                               # OpenAI API key
+Gemini_key=...                            # Google Gemini API key
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json   # only for Propublica [CLOUD] / BigQuery
 ```
 
+The version shown in the UI comes from the package metadata (`pyproject.toml`), not from `.env`.
+
 AWS credentials for the S3 upload step are expected via the standard boto3 mechanisms (env vars / `~/.aws/credentials` / IAM role) — they are **not** read from `.env`.
+
+> 🔒 Never commit `.env` or service-account JSON files. Both are gitignored and excluded from the built package.
 
 ---
 
@@ -169,22 +184,46 @@ AWS credentials for the S3 upload step are expected via the standard boto3 mecha
 
 ---
 
-## 8. Running & building
+## 8. Running & installing
 
-### Run from source
+### Development (from a clone of the repo)
 ```bash
-cd src
-python3 main.py
+uv run dataprocessor
 ```
-(Run from `src/` so the `from <section> import ...` package-style imports resolve.)
+`uv run` creates/updates the `.venv` automatically and installs anything missing, then launches the app. Keep API keys in the project-root `.env`.
 
-### Build a standalone executable
+### Install on another laptop (teammates)
+
+Prerequisites: collaborator access to this GitHub repo, and an SSH key or `gh auth login` set up for GitHub.
+
 ```bash
-pyinstaller --onefile --add-data ".env:." src/main.py
-# or use the committed spec:
-pyinstaller main.spec
+# 1. Install uv (installs its own Python — no system Python needed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# ... restart the terminal, then:
+
+# 2. Install the tool
+uv tool install git+ssh://git@github.com/<owner>/DataProcessor
+
+# 3. Add API keys (see section 6 for the variable names)
+mkdir -p ~/.dataprocessor
+nano ~/.dataprocessor/.env
+
+# 4. (Only for OCR of image-based PDFs)
+brew install tesseract ghostscript
+
+# 5. Run it
+dataprocessor
 ```
-The spec bundles `.env` as data and builds a single console executable named `main`.
+
+### Upgrading after a new version is pushed
+```bash
+uv tool upgrade dataprocessor
+```
+
+### Releasing a new version (maintainer)
+1. Bump `version` in `pyproject.toml`.
+2. Commit and push to GitHub.
+3. Tell teammates to run `uv tool upgrade dataprocessor`.
 
 ---
 

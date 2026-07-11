@@ -1,0 +1,49 @@
+[project]
+name = "dataprocessor"
+version = "1.2.1"
+description = "Nonprofit data collection and LLM analysis pipeline (filtering, PDF analysis, ProPublica API, spider)"
+readme = "DOCUMENTATION.md"
+requires-python = ">=3.11"
+dependencies = [
+    # AWS
+    "boto3",
+    # Environment / config
+    "python-dotenv",
+    # AI / LLM clients
+    "google-genai",
+    "openai",
+    # Data processing
+    "pandas",
+    "pandas-gbq",
+    # PDF / OCR (Tesseract + Ghostscript must be installed on the system for OCR)
+    "ocrmypdf",
+    "PyPDF2",
+    "pypdf",
+    # HTTP / scraping
+    "requests",
+    "beautifulsoup4",
+    # CLI / UI
+    "rich",
+    "tqdm",
+    "questionary",
+    # Date / time
+    "pytz",
+]
+
+[project.scripts]
+dataprocessor = "dataprocessor.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dataprocessor"]
+
+[tool.hatch.build]
+exclude = [
+    "**/__pycache__",
+    "**/*.csv",
+    "**/carlsonresearchsummer*.json",
+    "**/.env",
+]

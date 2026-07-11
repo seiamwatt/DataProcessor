@@ -1,0 +1,90 @@
+
+import time
+import random
+import platform
+from datetime import datetime, timedelta
+from collections import deque
+import questionary
+
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.table import Table
+from rich.text import Text
+from rich.align import Align
+from rich import box
+from rich.rule import Rule
+from rich.padding import Padding
+import questionary
+from dotenv import load_dotenv
+from dataprocessor.config import load_env
+import os
+from dataprocessor.main_section import main_util
+import sys
+import importlib.metadata
+
+# SETUP ---------------------------------------------------------------------------
+os.environ["TERM"] = "xterm-256color"
+def resource_path(relative_path):
+    """Get path for bundled files (works for both dev and PyInstaller)"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+
+load_env()
+try:
+    version = importlib.metadata.version("dataprocessor")
+except importlib.metadata.PackageNotFoundError:
+    version = os.getenv("version")
+
+console = Console()
+# ---------------------------------------------------------------------------------
+# UI ---------------------------------------------------------------------------
+def welcome_panel() -> Panel:
+    art = """[red]
+ ████   █████  ██████  █████ 
+ ██  ██ ██  ██   ██   ██  ██ 
+ ██  ██ █████    ██   █████  
+ ████   ██  ██   ██   ██  ██ 
+[blue]
+ ████  ████   ████   ████  ████  █████  █████  ████  ████ 
+ ██  █ ██  █ ██  ██ ██    ██    ██     ██     ██  ██ ██  █
+ ████  ████  ██  ██ ██    ████   ███    ███  ██  ██ ████ 
+ ██    ██  █  ████   ████  ████ █████  █████  ████  ██  █
+"""
+    return Panel(art, subtitle=f"[blue]version: {version}", highlight=True)
+    
+def choice_menu():
+    choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()
+    return choice
+
+def info_panel() -> Panel:
+    return Panel(f"Version:{version}",title="Info",highlight=True)
+
+def LLM_token_table():
+    table = Table(title = "LLM tokens rate",border_style="bright_cyan")
+    table.add_column("[blue]LLM",no_wrap=True)
+    table.add_column("[blue]Input (per 1M)",no_wrap=True)
+    table.add_column("[blue]Output (per 1M)",no_wrap=True)
+
+    table.add_row("DeepSeek","0.028 USD","0.42 USD")
+    table.add_row("GPT 4.1 ","3 USD","0.75 USD")
+    table.add_row("Gemini","1.25 USD","12 USD")
+    return table
+# ---------------------------------------------------------------------------------
+
+def show():
+    console.print(welcome_panel())
+    console.print(LLM_token_table())
+    
+
+if __name__ == "__main__":
+    show()

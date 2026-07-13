@@ -40,7 +40,7 @@ def main():
     choice = questionary.select("Select terminal",choices=["Filter Data","LLM Analysis - PDF URL","LLM Analysis - Raw PDF","LLM Analysis V2","LLM Analysis V2 - Raw PDF","Propublica API","Propublica API [CLOUD]","Spider","Settings"]).ask()
 
     if choice == "Filter Data":
-        os.system("clear")
+        os.system("cls" if os.name == "nt" else "clear")
         filter_page.show()
     elif choice == "LLM Analysis - PDF URL":
         analysis_page.show()

@@ -571,7 +571,10 @@ class URLExtractor:
     def extract(self, soup, base_url: str) -> set[str]:
         urls: set[str] = set()
         for a in soup.find_all("a", href=True):
-            absolute = urljoin(base_url, a["href"])
+            try:
+                absolute = urljoin(base_url, a["href"])
+            except ValueError:                    # malformed href, e.g. stray brackets
+                continue
             absolute, _ = urldefrag(absolute)     # drop #fragments
             if absolute.startswith(("http://", "https://")):
                 urls.add(absolute)

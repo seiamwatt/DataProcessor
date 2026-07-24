@@ -1,6 +1,6 @@
 from rich.console import Console
 
-from dataprocessor.filter_section import report_filter
+from dataprocessor.filter_section import report_filter_llm
 import time
 import questionary
 import subprocess
@@ -10,7 +10,7 @@ import os
 from dataprocessor.main_section import main_page
 from dataprocessor.main_section import settings_page
 from dataprocessor.filter_section import filter_page
-from dataprocessor.filter_section import report_filter
+from dataprocessor.filter_section import report_filter_llm
 from dataprocessor.analysis_section import analysis_page
 from dataprocessor.analysis_section import report_analysis
 from dataprocessor.analysisPDF_section import analysisPDF_page
@@ -65,6 +65,6 @@ if __name__ == "__main__":
 
 # ---------------------------------------------------------------------------------
 # run locally:            uv run dataprocessor
-# install as a CLI tool:  uv tool install git+ssh://git@github.com/<you>/DataProcessor
+# install as a CLI tool:  uv tool install git+https://github.com/seiamwatt/DataProcessor
 # upgrade installed tool: uv tool upgrade dataprocessor
 # API keys go in ~/.dataprocessor/.env (or a .env in the working directory)

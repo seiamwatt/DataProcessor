@@ -35,7 +35,7 @@ import boto3
 from botocore.exceptions import ClientError
 import pytz
 
-from dataprocessor.filter_section import report_filter
+from dataprocessor.filter_section import report_filter_llm
 
 console = Console()
 os.environ["TERM"] = "xterm-256color"
@@ -162,7 +162,7 @@ def show():
             try:
                 input_path = questionary.path("Input CSV file:", style=PROMPT_STYLE).ask()
                 input_path = input_path.strip("'\"")
-                df = report_filter.load_csv(input_path)
+                df = report_filter_llm.load_csv(input_path)
                 default_end_row = len(df)
 
                 output_path = questionary.path("Output CSV file:", style=PROMPT_STYLE).ask()
@@ -210,7 +210,7 @@ def show():
                 progress.update(task1, description=f"Batch {batch_num} of {total_batches}  |  Row {row_track}")
 
                 batch = df_subset.iloc[i:i+batch_size]
-                batch_result = report_filter.batch_processing(df_batch=batch, api_key=api_key, pdf_url_column=col_name, extract_text=True)
+                batch_result = report_filter_llm.batch_processing(df_batch=batch, api_key=api_key, pdf_url_column=col_name, extract_text=True)
 
                 if os.path.exists(output_path):
                     write_header = False

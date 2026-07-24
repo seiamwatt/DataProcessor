@@ -38,7 +38,97 @@ Dependencies are declared in `pyproject.toml` and pinned in `uv.lock` — `uv sy
 
 ---
 
-## 3. Project structure
+## 3. Architecture
+
+### 3.1 System diagram
+
+Every feature is a **section package** hung off a single menu router, and every section splits the same way: a presentation module that talks to the user, and a logic module that talks to the outside world. Nothing in the presentation layer calls an external service directly except the S3 upload in `filter_page`.
+
+```mermaid
+flowchart TB
+    CLI(["$ dataprocessor"]) --> MAIN["<b>main.py</b><br/>menu router"]
+    ENV["config.py<br/>load_env()"] -. "API keys" .-> MAIN
+
+    subgraph UI["Presentation layer &mdash; *_page.py / *_UI.py"]
+        direction LR
+        STP["settings_page<br/>main_page"]
+        FP["filter_page"]
+        AP["analysis_v2_page<br/>analysisPDF_v2_page"]
+        LP["analysis_page<br/>analysisPDF_page<br/><i>legacy v1</i>"]
+        PP["propublica_UI<br/>propublica_cloud_UI"]
+        SPU["spider_UI"]
+    end
+
+    subgraph LOGIC["Logic layer &mdash; report_*.py / *_logic.py"]
+        direction LR
+        MU["main_util"]
+        RF["report_filter_llm"]
+        AV2["analysis_v2<br/>analysisPDF_v2"]
+        RA["report_analysis<br/>report_analysis_pdfs"]
+        PL["propublica_logic<br/>propublica_cloud_logic"]
+        SPD["spider"]
+    end
+
+    subgraph EXT["External services"]
+        direction LR
+        PPAPI[("ProPublica<br/>Nonprofit Explorer")]
+        WEB[("Org websites<br/>+ Wayback CDX")]
+        DS{{"DeepSeek"}}
+        GPT{{"OpenAI GPT"}}
+        GEM{{"Google Gemini"}}
+        S3[("AWS S3")]
+        BQ[("BigQuery")]
+    end
+
+    MAIN --> STP
+    MAIN --> FP
+    MAIN --> AP
+    MAIN --> LP
+    MAIN --> PP
+    MAIN --> SPU
+
+    STP --> MU
+    FP --> RF
+    AP --> AV2
+    LP --> RA
+    PP --> PL
+    SPU --> SPD
+
+    MU --> DS
+    MU --> GPT
+    MU --> GEM
+    RF --> WEB
+    RF --> DS
+    AV2 --> WEB
+    AV2 --> DS
+    AV2 --> GPT
+    AV2 --> GEM
+    RA --> WEB
+    RA --> DS
+    PL --> PPAPI
+    PL --> BQ
+    SPD --> PPAPI
+    SPD --> WEB
+    FP -. "batch output" .-> S3
+
+    classDef svc fill:#1f6feb,stroke:#0b3d91,color:#ffffff
+    classDef entry fill:#8250df,stroke:#4c1d95,color:#ffffff
+    class PPAPI,WEB,DS,GPT,GEM,S3,BQ svc
+    class CLI,MAIN entry
+```
+
+**Reading the layers**
+
+| Layer | Responsibility | Never does |
+|---|---|---|
+| `main.py` | Route the menu choice to one section's `show()` | Any work of its own |
+| `*_page.py` / `*_UI.py` | Prompts, batch loop, progress bars, CSV append | Parse PDFs or call LLMs |
+| `report_*.py` / `*_logic.py` | HTTP, PDF/OCR, LLM calls, data shaping | Print to the user or ask questions |
+| `config.py` | Resolve `.env` from two locations | Validate individual keys |
+
+Each section owns its own **session loop** (`while status:`) and returns to the caller only when the user confirms exit, so sections never call each other — the pipeline is chained by CSV files on disk, not by imports.
+
+### 3.2 Module tree
 
 ```
 DataProcessor/
@@ -61,7 +151,7 @@ DataProcessor/
     │
     ├── filter_section/           # annual-report classification
     │   ├── filter_page.py        #   prompts, batch loop, S3 upload
-    │   └── report_filter.py      #   PDF extract + DeepSeek classify
+    │   └── report_filter_llm.py  #   PDF extract + DeepSeek classify
     │
     ├── analysis_v2_section/      # CURRENT analysis engine (3-model coding)
     │   ├── analysis_v2_page.py   #   prompts, batch loop, CSV append
@@ -81,10 +171,29 @@ DataProcessor/
         └── clean_csv.py          # standalone CSV cleaning helper
 ```
 
-### Section pattern
+### 3.3 Section pattern
 Most features follow a **UI / logic split**:
 - `*_page.py` / `*_UI.py` — Rich/questionary presentation, input gathering, the batch loop, and CSV/S3 output.
 - `report_*.py` / `*_logic.py` / `analysis_v2.py` — the actual work: HTTP calls, PDF parsing, LLM calls, data shaping.
+
+```mermaid
+flowchart LR
+    subgraph SEC["one *_section/ package"]
+        direction TB
+        PAGE["<b>*_page.py</b><br/>─────────────<br/>show()<br/>prompts · session loop<br/>batch loop · progress<br/>CSV append"]
+        LOG["<b>report_*.py</b><br/>─────────────<br/>load_csv()<br/>extract_pdf_text()<br/>create_prompt()<br/>connect_to_*()<br/>batch_processing()"]
+    end
+    USER(["User"]) <--> PAGE
+    PAGE -- "DataFrame batch + API key" --> LOG
+    LOG -- "DataFrame + new columns" --> PAGE
+    LOG <--> NET[("Network<br/>PDFs · APIs · LLMs")]
+    PAGE --> CSV[/"output CSV<br/>(appended per batch)"/]
+
+    classDef svc fill:#1f6feb,stroke:#0b3d91,color:#ffffff
+    class NET svc
+```
+
+Because output is appended **per batch** rather than at the end, a crashed or cancelled run keeps everything it already processed — resume by setting `Start row` to where it stopped.
 
 ---
 
@@ -130,6 +239,59 @@ Per row of the input CSV (`pdf_url` column by default):
 
 The page loop processes in **batches**, appends each batch to the output CSV, then `upload_to_s3()` pushes both input and output files to the `dataprocessor-input-bucket` / `dataprocessor-output-bucket` buckets (region `us-east-2`), timestamped in America/Chicago time.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant P as filter_page.show()
+    participant R as report_filter_llm
+    participant W as PDF host
+    participant D as DeepSeek
+    participant S as AWS S3
+
+    U->>P: input/output path, batch size,<br/>start/end row, column name
+    P->>R: load_csv(input_path)
+    R-->>P: DataFrame
+
+    loop every batch of `batch_size` rows
+        P->>R: batch_processing(df_batch, api_key, pdf_url_column)
+        loop every row in batch
+            R->>W: GET pdf_url
+            W-->>R: PDF bytes
+            Note over R: PyPDF2, up to 15 pages<br/>OCR fallback if under 50 chars<br/>truncate to 2000 chars
+            R->>D: create_prompt() → deepseek-reasoner
+            D-->>R: JSON verdict
+            Note over R: strip fences, parse JSON
+        end
+        R-->>P: batch + is_annual_report, confidence,<br/>classification_reason, year
+        P->>P: append batch to output CSV
+    end
+
+    P->>S: upload input + output CSV
+    P->>U: run summary panel (run ID, rows, elapsed)
+```
+
+#### PDF text extraction — the OCR branch
+
+Both the filter and the analysis engines share this shape; they differ only in the page cap and how much text they keep.
+
+```mermaid
+flowchart TB
+    A["pdf_url"] --> B["requests.get"]
+    B --> C["PyPDF2 read pages"]
+    C --> D{"extracted text<br/>&lt; 50 chars?"}
+    D -- "no · text-based PDF" --> G["join page text"]
+    D -- "yes · image-based scan" --> E["write temp PDF"]
+    E --> F["ocrmypdf<br/>(Tesseract + Ghostscript)"]
+    F --> G
+    G --> H{"which caller?"}
+    H -- "filter" --> I["first 2000 chars<br/>max 15 pages"]
+    H -- "analysis v2" --> J["full document<br/>temp file cleaned in finally"]
+
+    classDef warn fill:#bf8700,stroke:#7a5600,color:#ffffff
+    class F warn
+```
+
 ### 5.3 Analysis V2 (`analysis_v2_section`) — the main analytical engine
 Per row:
 1. `extract_pdf_text()` — same download/OCR approach but extracts the **full document** (uses a temp file for OCR and cleans it up in `finally`).
@@ -144,6 +306,31 @@ Per row:
 5. Each model's fields are flattened onto the result row with a prefix: **`ds_`, `gm_`, `gpt_`** (e.g. `ds_ID_Primary`, `gpt_OVERALL_Intensity`). On parse failure, fields are set to `"Parsing Error"`.
 
 Output is appended to CSV per batch.
+
+```mermaid
+flowchart LR
+    ROW["CSV row<br/>pdf_url"] --> EX["extract_pdf_text()<br/>full document"]
+    EX --> PR["create_prompt()<br/>~40-field coding schema"]
+
+    PR --> DS["connect_to_DeepSeek<br/><i>deepseek-chat</i>"]
+    PR --> GM["connect_to_Gemini<br/><i>gemini-3.1-pro-preview</i>"]
+    PR --> GP["connect_to_GPT<br/><i>gpt-5.1</i>"]
+
+    DS --> FD["format_api_output()"]
+    GM --> FG["format_api_output()"]
+    GP --> FP2["format_api_output()"]
+
+    FD --> OUT["result row"]
+    FG --> OUT
+    FP2 --> OUT
+
+    OUT --> CSV[/"coded CSV<br/>ds_* · gm_* · gpt_*<br/>999 / N/A for missing<br/>'Parsing Error' on failure"/]
+
+    classDef llm fill:#1f6feb,stroke:#0b3d91,color:#ffffff
+    class DS,GM,GP llm
+```
+
+The same prompt goes to all three models so their codings are directly comparable column-for-column — the point of the `ds_` / `gm_` / `gpt_` prefixes is inter-rater agreement, not redundancy.
 
 ### 5.4 Settings (`main_section/settings_page.py`)
 Displays the configured API keys and runs live connectivity tests (`main_util.DeepSeek_connect_test` / `GTP_connect_test` / `Gemini_connect_test`) showing each model **Online/Offline**.
@@ -194,15 +381,19 @@ uv run dataprocessor
 
 ### Install on another laptop (teammates)
 
-Prerequisites: collaborator access to this GitHub repo, and an SSH key or `gh auth login` set up for GitHub.
+Prerequisites: collaborator access to this GitHub repo (ask the owner for an invite), and a GitHub login on the machine — `gh auth login` is the easiest, an SSH key already registered with GitHub also works.
 
 ```bash
 # 1. Install uv (installs its own Python — no system Python needed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 # ... restart the terminal, then:
 
-# 2. Install the tool
-uv tool install git+ssh://git@github.com/<owner>/DataProcessor
+# 2. Authenticate with GitHub (private repo — you must be invited as a collaborator first)
+brew install gh && gh auth login     # choose HTTPS when prompted
+uv tool install git+https://github.com/seiamwatt/DataProcessor
+
+# ...or, if you'd rather use an SSH key you've already added to GitHub:
+uv tool install git+ssh://git@github.com/seiamwatt/DataProcessor
 
 # 3. Add API keys (see section 6 for the variable names)
 mkdir -p ~/.dataprocessor
@@ -229,13 +420,37 @@ uv tool upgrade dataprocessor
 
 ## 9. Data flow summary
 
+Stages are chained by **CSV files on disk**, not by code — each one is a separate menu choice you run yourself, so you can start at any stage with a CSV from elsewhere.
+
+```mermaid
+flowchart TB
+    PPAPI[("ProPublica<br/>Nonprofit Explorer API")] --> S1
+
+    S1["<b>Stage 1 · Collect</b><br/>propublica_UI<br/>57 states × NTEE category<br/>ruling year ≤ 2000"]
+    S1 --> C1[/"orgs CSV<br/>name · EIN · NTEE · address<br/>revenue · assets"/]
+    S1 -. "[CLOUD] variant" .-> BQ[("BigQuery table")]
+
+    C1 --> S2["<b>Stage 2 · Discover</b> <i>(optional)</i><br/>spider_UI<br/>BFS crawl + Wayback CDX<br/>+ ProPublica 990 seeder"]
+    WEB[("Org websites<br/>Wayback Machine")] --> S2
+    S2 --> C2[/"PDF URL CSV<br/>pdf_url per org"/]
+    C1 -. "if URLs already known" .-> C2
+
+    C2 --> S3["<b>Stage 3 · Filter</b><br/>filter_page<br/>download → OCR → DeepSeek<br/>'is this an annual report?'"]
+    S3 --> C3[/"annual-reports CSV<br/>is_annual_report · confidence<br/>classification_reason · year"/]
+    S3 -. "input + output copies" .-> S3B[("AWS S3<br/>us-east-2")]
+
+    C3 --> S4["<b>Stage 4 · Analyze</b><br/>analysis_v2_page<br/>download → 3 LLMs in parallel<br/>~40-field content coding"]
+    S4 --> C4[/"coded CSV<br/>ds_* · gm_* · gpt_* per row"/]
+
+    classDef svc fill:#1f6feb,stroke:#0b3d91,color:#ffffff
+    classDef stage fill:#2da44e,stroke:#166534,color:#ffffff
+    classDef data fill:#6e7781,stroke:#39414a,color:#ffffff
+    class PPAPI,WEB,BQ,S3B svc
+    class S1,S2,S3,S4 stage
+    class C1,C2,C3,C4 data
 ```
-ProPublica API ──> orgs CSV ──> [Filter: download PDF + OCR + DeepSeek] ──> annual-reports CSV
-                                                                                │
-                                                                                ▼
-                                          [Analysis V2: download PDF + 3 LLMs] ──> coded CSV
-                                          (ds_*, gm_*, gpt_* columns per row)
-```
+
+**Filter before analyze.** Stage 3 exists to keep stage 4 cheap — analysis sends the *full* document text to three models per row, so discarding non-annual-reports first is where most of the token cost is saved.
 
 ---
 

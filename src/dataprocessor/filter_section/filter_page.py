@@ -36,6 +36,7 @@ from botocore.exceptions import ClientError
 import pytz
 
 from dataprocessor.filter_section import report_filter_llm
+from dataprocessor.filter_section import report_filter_pattern
 
 console = Console()
 os.environ["TERM"] = "xterm-256color"
@@ -164,6 +165,7 @@ def show():
                 input_path = input_path.strip("'\"")
                 df = report_filter_llm.load_csv(input_path)
                 default_end_row = len(df)
+                filter_type_pattern = questionary.confirm("Filter by pattern?",style=PROMPT_STYLE).ask()
 
                 output_path = questionary.path("Output CSV file:", style=PROMPT_STYLE).ask()
                 batch_size = questionary.text("Batch size", style=PROMPT_STYLE).ask()
@@ -179,64 +181,114 @@ def show():
             except Exception as e:
                 console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Check the file path and ensure numeric fields contain whole numbers, then try again.[/]")
 
-        api_key = os.getenv("DeepSeek_key")
-        if api_key is None:
-            console.print(f"[{ERR}]API key not found.[/] [{MUTED}]Add DeepSeek_key to the .env file and restart the application.[/]")
-            return
+        if filter_type_pattern is False:
+            api_key = os.getenv("DeepSeek_key")
+            if api_key is None:
+                console.print(f"[{ERR}]API key not found.[/] [{MUTED}]Add DeepSeek_key to the .env file and restart the application.[/]")
+                return
 
-        df_subset = df.iloc[start_row:end_row]
-        all_results = []
-        total_batches = (len(df_subset) + batch_size - 1) // batch_size
+            df_subset = df.iloc[start_row:end_row]
+            all_results = []
+            total_batches = (len(df_subset) + batch_size - 1) // batch_size
 
-        console.print(Rule("Processing", style=ACCENT))
+            console.print(Rule("Processing", style=ACCENT))
 
-        row_track = start_row
+            row_track = start_row
 
-        with Progress(
-            SpinnerColumn(style=ACCENT),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
-            MofNCompleteColumn(),
-            TextColumn(f"[{MUTED}]batches"),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-            console=console,
-        ) as progress:
-            time_start = time.time()
-            task1 = progress.add_task("Filtering data", total=total_batches)
+            with Progress(
+                SpinnerColumn(style=ACCENT),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+                MofNCompleteColumn(),
+                TextColumn(f"[{MUTED}]batches"),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                console=console,
+            ) as progress:
+                time_start = time.time()
+                task1 = progress.add_task("Filtering data", total=total_batches)
 
-            for i in range(0, len(df_subset), batch_size):
-                batch_num = i // batch_size + 1
-                progress.update(task1, description=f"Batch {batch_num} of {total_batches}  |  Row {row_track}")
+                for i in range(0, len(df_subset), batch_size):
+                    batch_num = i // batch_size + 1
+                    progress.update(task1, description=f"Batch {batch_num} of {total_batches}  |  Row {row_track}")
 
-                batch = df_subset.iloc[i:i+batch_size]
-                batch_result = report_filter_llm.batch_processing(df_batch=batch, api_key=api_key, pdf_url_column=col_name, extract_text=True)
+                    batch = df_subset.iloc[i:i+batch_size]
+                    batch_result = report_filter_llm.batch_processing(df_batch=batch, api_key=api_key, pdf_url_column=col_name, extract_text=True)
 
-                if os.path.exists(output_path):
-                    write_header = False
-                else:
-                    write_header = True
+                    if os.path.exists(output_path):
+                        write_header = False
+                    else:
+                        write_header = True
 
-                batch_result.to_csv(output_path, mode='a', header=write_header, index=False)
+                    batch_result.to_csv(output_path, mode='a', header=write_header, index=False)
 
-                row_track = row_track + 1
-                progress.update(task1, advance=1)
+                    row_track = row_track + 1
+                    progress.update(task1, advance=1)
 
-            id = str(uuid.uuid4())
-            progress.stop()
-            time_elapsed = time.time() - time_start
-            data_to_log = [id, start_row, end_row, time_elapsed]
+                id = str(uuid.uuid4())
+                progress.stop()
+                time_elapsed = time.time() - time_start
+                data_to_log = [id, start_row, end_row, time_elapsed]
 
-        # S3 upload (outside Progress block)
-        upload_to_s3(input_path, output_path)
-        console.print(run_summary_panel(id, start_row, end_row, time_elapsed, output_path))
-        status_update = questionary.confirm("Exit the application?", style=PROMPT_STYLE).ask()
+            # S3 upload (outside Progress block)
+            console.print(run_summary_panel(id, start_row, end_row, time_elapsed, output_path))
+            status_update = questionary.confirm("Exit the application?", style=PROMPT_STYLE).ask()
 
-        if status_update:
-            console.print(f"[{MUTED}]Session ended.[/]")
-            status = False
+            if status_update:
+                console.print(f"[{MUTED}]Session ended.[/]")
+                status = False
+
+        if filter_type_pattern:
+            df_subset = df.iloc[start_row:end_row]
+            total_rows = len(df_subset)
+
+            console.print(Rule("Processing", style=ACCENT))
+            row_track = start_row
+            all_results = []
+
+            with Progress(
+                SpinnerColumn(style=ACCENT),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+                MofNCompleteColumn(),
+                TextColumn(f"[{MUTED}]batches"),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                console=console,
+            ) as progress:
+                time_start = time.time()
+                task1 = progress.add_task("Filtering data", total=total_rows)
+
+                for i in range(0, len(df_subset)):
+                    row = df_subset.iloc[i]
+                    pdf_url = row[col_name]
+
+                    is_report = report_filter_pattern.identify_reports(pdf_url)
+
+                    result_row = row.copy()
+                    result_row["is_annual_report"] = is_report
+                    batch_result = pd.DataFrame([result_row])
+
+                    if os.path.exists(output_path):
+                        write_header = False
+                    else:
+                        write_header = True
+
+                    batch_result.to_csv(output_path, mode='a', header=write_header, index=False)
+                    row_track += 1
+                    progress.update(task1, advance=1)
+
+                id = str(uuid.uuid4())
+                progress.stop()
+                time_elapsed  = time.time() - time_start
 
 
+            console.print(run_summary_panel(id, start_row, end_row, time_elapsed, output_path))
+            status_update = questionary.confirm("Exit the application?", style=PROMPT_STYLE).ask()
+            
+            if status_update:
+                console.print(f"[{MUTED}]Session ended.[/]")
+                status = False
 
 if __name__ == "__main__":
     show()

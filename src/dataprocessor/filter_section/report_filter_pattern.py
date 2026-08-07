@@ -1,4 +1,5 @@
 import json
+import re
 import argparse
 import requests
 import pandas as pd
@@ -15,47 +16,32 @@ import sys, os
 from rapidfuzz import fuzz,process 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# The document type itself, in the spellings PDF text extraction throws up.
+# Matched as substrings against whitespace-normalised text, so these also cover
+# titles like "2023 Annual Report" and "Annual Report FY2024".
 KEY_WORDS = {
-    # tax status / IRS filings (very high precision — near-exclusive to nonprofits)
-    "501c3", "990", "990-ez", "990-pf", "ein",
-    "tax-exempt", "tax-deductible", "nonprofit", "non-profit","annual-report"
-    "not-for-profit", "charitable", "charity",
-    # financial-statement terminology (nonprofit-specific)
-    "endowment", "unrestricted", "restricted",
-    # fundraising / philanthropy
-    "philanthropy", "philanthropic", "donors", "donations", "donor",
-    "fundraising", "fundraiser", "grantmaking", "grantees", "grants",
-    "bequest", "bequests", "stewardship", "beneficiaries",
-    # governance / mission
-    "trustees", "volunteers", "volunteerism", "underserved",
-    # registries
-    "guidestar",
+    "annual report",
+    "annual reports",
+    "annual-report",
+    "annual_report",
+    "annualreport",
+    "annual impact report",
+    "annual review",
+    "annual-review",
 }
 
-KEY_SENTENCES = {
-    # legal / tax-status boilerplate (very high precision)
-    "is a 501(c)(3)",
-    "501(c)(3) nonprofit organization",
-    "your donation is tax-deductible",
-    "all donations are tax-deductible",
-    "no goods or services were provided",
-    # leadership letters (standard front-matter of nonprofit annual reports)
-    "letter from the executive director",
-    "message from the executive director",
-    "on behalf of the board of directors",
-    # audited financial statement headings
-    "statement of financial position",
-    "statement of activities",
-    "statement of functional expenses",
-    "notes to the financial statements",
-    "independent auditor's report",
-    "net assets without donor restrictions",
-    "net assets with donor restrictions",
-    # mission / donor-gratitude framing
-    "our mission is to",
-    "thanks to the generosity of our donors",
-    "with your continued support",
-    "the communities we serve",
+# Full phrases that name the document explicitly. Any one of these is enough.
+STRONG_INDICATORS = {
+    "this annual report",
+    "in this annual report",
+    "our annual report",
+    "the annual report of",
+    "annual report to the community",
+    "annual report to our donors",
+    "annual report to our supporters",
+    "annual report and financial statements",
+    "annual impact report",
+    "annual report highlights",
 }
 
 def load_csv(file_path):
@@ -106,38 +92,27 @@ def extract_pdf_text(pdf_url,max_pages= 15):
         print(f"error processing pdf: {e}")
         return None
 
-def find_key_sentence(pdf_url):
+def normalise(text):
+    """Lowercase and collapse whitespace so phrases survive PDF line breaks."""
+    return re.sub(r"\s+", " ", text.lower())
+
+def identify_reports(pdf_url):
+    """True when the PDF names itself an annual report.
+
+    Nonprofit vocabulary alone is not enough — a 990, an appeal letter and a
+    newsletter all use it. The document has to say what it is.
+    """
     extracted_text = extract_pdf_text(pdf_url)
 
     if not extracted_text:
         return False
 
-    text = extracted_text.lower()
-    count = 0
+    text = normalise(extracted_text)
 
-    for sentence in KEY_SENTENCES:
-        if sentence in text:
+    for phrase in KEY_WORDS | STRONG_INDICATORS:
+        if phrase in text:
             return True
 
-    return False
-
-def identify_reports(pdf_url,target:int = 10):
-    extracted_text = extract_pdf_text(pdf_url)
-
-    if not extracted_text:
-        return False
-
-    text = extracted_text.lower()
-    count = 0
-
-    for word in text.split():
-        word = word.strip(".,;:()[]\"'")
-        if word in KEY_WORDS:
-            count += 1
-
-        if count >= target:
-            return True
-    
     return False
 
 

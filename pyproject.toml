@@ -15,6 +15,7 @@ dependencies = [
     # Data processing
     "pandas",
     "pandas-gbq",
+    "rapidfuzz",
     # PDF / OCR (Tesseract + Ghostscript must be installed on the system for OCR)
     "ocrmypdf",
     "PyPDF2",

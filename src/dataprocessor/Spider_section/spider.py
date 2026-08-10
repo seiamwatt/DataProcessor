@@ -98,8 +98,10 @@ WAYBACK_CDX = "https://web.archive.org/cdx/search/cdx"
 
 # Filename tokens that mark a PDF as an "annual report" (used to avoid grabbing
 # every PDF on a site). Disable with --all-pdfs.
-REPORT_KEYWORDS = ("annual", "report", "annualreport", "annual-report",
-                   "year-in-review", "yearinreview", "impact", "ar20", "ar-20")
+# Matched against a lowercased URL, so lowercase entries cover every casing.
+REPORT_KEYWORDS = ("annual report", "annualreport", "annual-report", "annual_report",
+                   "annual.report", "annual%20report", "annual+report",
+                   "annualrpt", "annual-rpt", "annrep", "ann-rep", "annrpt")
 
 # Static-asset extensions the live crawl should never follow. Following these
 # just burns the per-site page budget on files that can't contain report PDFs

@@ -30,10 +30,6 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 # ---------------------------------------------------------------------------------
 # MAIN UI -------------------------------------------------------------------------
 
-# UI pages
-def choice_menu():
-    choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()
-    return choice
 
 def main():
     main_page.show()
@@ -68,3 +64,4 @@ if __name__ == "__main__":
 # install as a CLI tool:  uv tool install git+https://github.com/seiamwatt/DataProcessor
 # upgrade installed tool: uv tool upgrade dataprocessor
 # API keys go in ~/.dataprocessor/.env (or a .env in the working directory)
+

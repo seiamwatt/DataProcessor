@@ -27,7 +27,8 @@ import pandas as pd
 from urllib.parse import urlparse
 
 from dataprocessor.Spider_section.spider import (
-    Config, Crawler, URLFilter, WorkItem, console, registered_domain,
+    Config, ContentStorage, Crawler, URLFilter, WorkItem, console,
+    manifest_name, registered_domain,
 )
 
 
@@ -76,12 +77,14 @@ def main() -> None:
                     help="OCR scanned PDFs (needs ocrmypdf+tesseract)")
     args = ap.parse_args()
 
-    # Only the live crawl applies to URL seeds -- 990/wayback are org-based.
+    # Only the live crawl applies to URL seeds -- wayback is org-based.
     cfg = replace(env_cfg, max_depth=args.depth, output_dir=args.out,
                   sources=("live",), all_pdfs=args.all_pdfs,
                   do_ocr=args.ocr, links_only=not args.download)
 
-    crawler = Crawler(cfg)
+    # Write into the live lane's manifest, not a stray manifest.csv, so the
+    # documented "append only the NEW finds" resume actually resumes.
+    crawler = Crawler(cfg, storage=ContentStorage(args.out, manifest_name("live")))
     queued = seed_crawler(crawler, args.seeds)
     console.print(f"[bold]Seeded {queued} URL(s); crawling {args.depth} hop(s) "
                   f"out from each -> {args.out}[/bold]")

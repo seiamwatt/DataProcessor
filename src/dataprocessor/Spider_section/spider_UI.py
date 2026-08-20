@@ -2,7 +2,7 @@
 Terminal UI (rich + questionary)
 
 Interactive:      python spider_ui.py
-Non-interactive:  python spider_ui.py --csv orgs.csv --out ./reports --sources 990,wayback,live
+Non-interactive:  python spider_ui.py --csv orgs.csv --out ./reports --sources wayback,live
 """
 
 import argparse
@@ -12,7 +12,7 @@ import time
 from datetime import timedelta
 
 import questionary
-from questionary import Choice, Style, Validator, ValidationError
+from questionary import Style, Validator, ValidationError
 from rich import box
 from rich.align import Align
 from rich.columns import Columns
@@ -52,10 +52,15 @@ Q_STYLE = Style(
 )
 
 SOURCES = {
-    "990": ("IRS Form 990 filings", "ProPublica, back to 2001"),
-    "wayback": ("Archived report PDFs", "Internet Archive snapshots"),
-    "live": ("Current report PDFs", "BFS crawl of the live site"),
+    "wayback": ("Archived report PDFs", "Internet Archive \u2014 backfills what live misses"),
+    "live": ("Current report PDFs", "BFS crawl of the live site (runs first)"),
 }
+
+# What every interactive crawl runs. These two are complementary, not
+# alternatives: live sweeps the current site and wayback backfills the reports
+# it no longer serves.
+#
+DEFAULT_SOURCES = tuple(SOURCES)
 
 # ------------------------------------------------------------- utilities ---
 
@@ -138,7 +143,9 @@ def banner() -> Panel:
 
 
 def sources_table() -> Table:
-    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, title="Sources", title_style=f"bold {INK}", expand=True)
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM,
+              title="Sources (live + wayback run every crawl)",
+              title_style=f"bold {INK}", expand=True)
     t.add_column("ID", style=f"bold {ACCENT}", no_wrap=True)
     t.add_column("Retrieves", style=INK)
     t.add_column("Source", style=MUTED)
@@ -152,8 +159,7 @@ def inputs_table() -> Table:
     t.add_column("Input", style=f"bold {INK}", no_wrap=True)
     t.add_column("Notes", style=MUTED)
     t.add_row("Org CSV", "Columns: name, domain, ein")
-    t.add_row("Output folder", "Destination for PDFs and manifest.csv")
-    t.add_row("Sources", "Any combination of the three sources")
+    t.add_row("Output folder", "Destination for PDFs and one manifest per source")
     t.add_row("Years / depth", "Defaults: 20 years, depth 3")
     t.add_row("Row range", "Subset of CSV rows to process")
     return t
@@ -224,7 +230,9 @@ def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
     lines.add_column(style=INK)
     lines.add_row("Documents", Text(str(len(manifest)), style=f"bold {ACCENT}"))
     lines.add_row("Elapsed", fmt_duration(elapsed))
-    lines.add_row("Manifest", os.path.join(os.path.abspath(cfg["out_dir"]), "manifest.csv"))
+    for src in cfg["sources"]:
+        path = os.path.join(os.path.abspath(cfg["out_dir"]), spider.manifest_name(src))
+        lines.add_row(f"Manifest ({src})", path if os.path.exists(path) else "\u2014 nothing collected")
 
     # Per-source breakdown if the manifest exposes it
     try:
@@ -277,20 +285,6 @@ def ask_config() -> dict | None:
         console.print(f"[bold {DANGER}]{out_dir} exists and is not a folder.[/]")
         return None
 
-    # Sources
-    sources = questionary.checkbox(
-        "Sources to run:",
-        choices=[
-            Choice(f"990 \u2014 {SOURCES['990'][0]}", value="990", checked=True),
-            Choice(f"wayback \u2014 {SOURCES['wayback'][0]}", value="wayback", checked=True),
-            Choice(f"live \u2014 {SOURCES['live'][0]}", value="live", checked=True),
-        ],
-        validate=lambda picked: True if picked else "Select at least one source",
-        style=Q_STYLE,
-    ).ask()
-    if sources is None:
-        return None
-
     # Numbers — each validated inline, bounds-checked against the CSV
     years = questionary.text("Years of lookback:", default="20", validate=IntValidator(lo=1, hi=100), style=Q_STYLE).ask()
     if years is None:
@@ -316,7 +310,7 @@ def ask_config() -> dict | None:
         "org_csv_path": org_csv_path,
         "orgs_df": orgs_df,
         "out_dir": out_dir,
-        "sources": sources,
+        "sources": DEFAULT_SOURCES,
         "years": int(years),
         "depth": int(depth),
         "start_row": int(start_row),
@@ -370,7 +364,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Spider — nonprofit report crawler")
     p.add_argument("--csv", help="org list CSV (name,domain,ein)")
     p.add_argument("--out", default="./reports", help="output folder")
-    p.add_argument("--sources", help="comma-separated: 990,wayback,live")
+    p.add_argument("--sources", help="comma-separated: wayback,live")
     p.add_argument("--years", type=int, default=20)
     p.add_argument("--depth", type=int, default=3)
     p.add_argument("--start-row", type=int, default=0)

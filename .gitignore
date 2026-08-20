@@ -12,3 +12,5 @@ build/
 
 # macOS
 .DS_Store
+.env.bak
+.env.*

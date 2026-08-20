@@ -28,6 +28,7 @@ KEY_WORDS = {
     "annual impact report",
     "annual review",
     "annual-review",
+    "ar"
 }
 
 # Full phrases that name the document explicitly. Any one of these is enough.
@@ -64,6 +65,15 @@ def IMG_to_pdf(file_path):
     output_path = file_path
     ocrmypdf.ocr(file_path,output_path,deskew=True)
     return output_path
+
+
+# TODO: make func that filter by URL first if they match it\
+def identify_by_url(pdf_url):
+    lower_case_url = pdf_url.lower()
+    for word in KEY_WORDS:
+        if word in lower_case_url:
+            return True
+    return False
 
 def extract_pdf_text(pdf_url,max_pages= 15):
     try:

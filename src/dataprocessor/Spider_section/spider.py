@@ -3,17 +3,27 @@
 nonprofit_reports.py
 ====================
 
-Collect nonprofit "annual reports" from three complementary sources, going back
+Collect nonprofit "annual reports" from two complementary sources, going back
 ~20 years, and drop everything into a manifest per organization.
 
-  1. ProPublica Nonprofit Explorer  -> IRS Form 990 filings (the financial return)
+  1. Live site crawl (BFS)          -> current published-report PDFs
   2. Wayback Machine CDX API        -> historical published-report PDFs (since removed)
-  3. Live site crawl (BFS)          -> current published-report PDFs
 
-ProPublica and Wayback are treated as SEEDERS: they discover URLs and push them
-into the same URL frontier the live crawler uses. The BFS crawler then handles
-collection, dedup, (optionally) downloading + text extraction / OCR, and storage
-uniformly for all three.
+Wayback is treated as a SEEDER: it discovers URLs and pushes them into the same
+URL frontier the live crawler uses. The BFS crawler then handles collection,
+dedup, (optionally) downloading + text extraction / OCR, and storage uniformly
+for both.
+
+The frontier is ordered LIVE-FIRST: the entire live crawl (including every URL
+its BFS expansion turns up) drains before the first Wayback snapshot is touched,
+so the archive is read after the live site rather than interleaved with it.
+Ordering only: the live crawl never suppresses a Wayback result. A report that
+exists both on the live site and in the archive is recorded TWICE -- once as
+source=live with its current URL, once as source=wayback with the snapshot URL
+-- because a live URL found in links-only mode is never fetched, so there is no
+evidence it still resolves. Keeping the snapshot means a dead live link doesn't
+cost you the document. Collapse on your own terms downstream if you want one
+row per report.
 
 By default this runs in LINKS-ONLY mode: instead of downloading each PDF, it just
 records the PDF's URL in the manifest. Pass --download (CLI) or links_only=False
@@ -24,7 +34,6 @@ Input: a JSON file describing the orgs, e.g.
     {"name": "Carnegie Hall", "domain": "carnegiehall.org", "ein": "131923635"},
     {"name": "Whitney Museum of American Art", "domain": "whitney.org"}
   ]
-(`ein` is optional -- if omitted, the script searches ProPublica by `name`.)
 
 Run:
   python nonprofit_reports.py --orgs orgs.json --out ./reports --years 20
@@ -45,8 +54,10 @@ import re
 import socket
 import sys
 import tempfile
+import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import Iterator, Optional
@@ -58,7 +69,7 @@ from dataprocessor.config import load_env
 from requests.adapters import HTTPAdapter
 from rich.console import Console
 from tqdm import tqdm
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import urljoin, urlparse, urldefrag, unquote
 from urllib.robotparser import RobotFileParser
 
 # pypdf is the maintained successor to PyPDF2; fall back for old environments.
@@ -92,16 +103,163 @@ console = Console()
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 log = logging.getLogger("nonprofit_reports")
 
-PROPUBLICA_SEARCH = "https://projects.propublica.org/nonprofits/api/v2/search.json"
-PROPUBLICA_ORG = "https://projects.propublica.org/nonprofits/api/v2/organizations/{ein}.json"
 WAYBACK_CDX = "https://web.archive.org/cdx/search/cdx"
 
-# Filename tokens that mark a PDF as an "annual report" (used to avoid grabbing
-# every PDF on a site). Disable with --all-pdfs.
-# Matched against a lowercased URL, so lowercase entries cover every casing.
-REPORT_KEYWORDS = ("annual report", "annualreport", "annual-report", "annual_report",
-                   "annual.report", "annual%20report", "annual+report",
-                   "annualrpt", "annual-rpt", "annrep", "ann-rep", "annrpt")
+# ---------------------------------------------------------------------------
+# "Does this URL look like a published annual report?"  (disable with --all-pdfs)
+#
+# Three independent signals, scored against the 452 confirmed reports in
+# util/temp_resources/Agg_pilot.xlsx -- see util/score_report_filter.py, which
+# re-runs the numbers quoted here:
+#
+#   1. keyword   -- "annual" / "report" anywhere in the path
+#   2. ar-token  -- "ar" standing alone as a token
+#   3. org+year  -- the filename is the org's name/acronym next to a year and
+#                   nothing else
+#
+# Recall on real report URLs 95.7% -> 98.3%, on publisher filenames 55.9% ->
+# 91.2%, with no measured precision loss against same-site non-reports.
+# ---------------------------------------------------------------------------
+
+# Matched against the URL PATH -- directories included, not just the filename.
+# Plenty of real reports have an opaque filename that only the directory
+# identifies: /media/annual_report/2011/essay_3.pdf,
+# /annualreports/LEAR2004_pdf/Complete.pdf. Scoring against a set of confirmed
+# reports, path-matching beats filename-matching by ~28 points of recall.
+#
+# Substring match, so "annual" already covers annualreport, annual-report,
+# annual_report, annual%20report (unquoted first), annual-update, 2002_annual.
+REPORT_KEYWORDS = ("annual", "report")
+
+_RUN = re.compile(r"[A-Z]+|[a-z]+|\d+")
+
+
+def _chunk_tokens(chunk: str) -> list[str]:
+    """Tokenize one alphanumeric chunk, splitting camelCase and digit edges.
+
+    An uppercase run followed by a lowercase run is genuinely ambiguous:
+    "AARPCorporate" wants AARP|Corporate (the run's last capital starts the
+    next word) while "ARweb" wants AR|web (the run is a whole acronym). The two
+    have identical shape, so rather than guess we emit BOTH readings -- these
+    tokens are only ever membership-tested, so a spare one costs nothing.
+    """
+    runs = _RUN.findall(chunk)
+    out: list[str] = []
+    i = 0
+    while i < len(runs):
+        run = runs[i]
+        nxt = runs[i + 1] if i + 1 < len(runs) else ""
+        if run.isupper() and nxt.islower():
+            if len(run) > 1:
+                out += [run[:-1], run[-1] + nxt,   # AARP | Corporate
+                        run, nxt]                  # AR   | web
+            else:
+                out.append(run + nxt)              # A | nnual -> Annual
+            i += 2
+        else:
+            out.append(run)
+            i += 1
+    return out
+
+
+def path_tokens(text: str) -> list[str]:
+    """Lowercased word tokens of a path. Case matters on the way in (it's what
+    makes AARPCorporateAR2003 splittable), so don't pre-lower the input."""
+    out: list[str] = []
+    for chunk in re.split(r"[^A-Za-z0-9]+", text):
+        if chunk:
+            out += _chunk_tokens(chunk)
+    toks = [t.lower() for t in out if t]
+    # filenames often glue the format on: arpdf99 -> ar, LAMBDA_PDF -> lambda
+    return toks + [t[:-3] for t in toks if len(t) > 3 and t.endswith("pdf")]
+
+
+# A year, a 2-digit year, or a doubled year like 201516 (FY2015-16).
+_YEARISH = re.compile(r"^(?:(?:19|20)\d{2,4}|\d{1,2})$")
+
+# Treat a filename that is nothing but a year ("/…/2017.pdf") as a report.
+# This is the loosest rule here and the only one with an unmeasured error rate:
+# it recovers reports published under opaque CMS paths (Mellon files theirs as
+# /media/filer_public/<uuid>/2017.pdf) but will also take /library/2004.pdf.
+# Set False to trade ~1 point of URL recall for that risk.
+ALLOW_BARE_YEAR_FILENAME = True
+_ORG_STOP = {"the", "of", "for", "and", "inc", "a", "an"}
+# Cosmetic suffixes publishers hang off a report filename. Tolerated so that
+# "Hoover_2022_Annual_Report_Final_Web_v5" still reads as "org + year only".
+_NAME_NOISE = {"final", "web", "hires", "hi", "res", "low", "lr", "copy",
+               "small", "online", "single", "spreads", "interior", "optimized",
+               "draft", "version", "v", "en", "english", "new", "full",
+               "complete", "print", "pages", "pagesremoved", "compressed",
+               "reduced", "r"}
+
+
+def org_name_tokens(org_name: str) -> tuple[set[str], list[str]]:
+    """The ways an org might sign a filename: words, initials, truncations."""
+    words = [w.lower() for w in re.split(r"[^A-Za-z0-9]+", org_name or "") if w]
+    sig = [w for w in words if w not in _ORG_STOP]
+    toks = {w for w in sig if len(w) >= 3}
+    if len(sig) == 1:
+        toks.add(sig[0])                                  # IAD, RAND, AARP
+    elif len(sig) > 1:
+        toks.add("".join(w[0] for w in sig))              # Heritage Foundation -> hf
+        for n in (3, 4):                                  # MacArthur Foundation -> macf
+            if len(sig[0]) > n:
+                toks.add(sig[0][:n] + "".join(w[0] for w in sig[1:]))
+    return toks, sig
+
+
+def _org_year_filename(path: str, org_name: str) -> bool:
+    """The filename is the org's name/acronym beside a year AND NOTHING ELSE.
+
+    The "nothing else" clause is the whole reason this is safe. Without it --
+    i.e. matching any filename holding the org name and a year -- it fires on
+    27 of 30 hand-built negatives: tax returns, form 990s, press kits, working
+    papers, surveys all carry both. Reports filed this way (IAD1998.pdf,
+    Demos_2020.pdf, "hf 2020.pdf") carry no other substantive word; the false
+    positives always do.
+    """
+    toks, sig = org_name_tokens(org_name)
+    if not toks:
+        return False
+    stem = os.path.splitext(path.rsplit("/", 1)[-1])[0]
+    fname = path_tokens(stem)
+    if not fname:
+        return False
+    if not any(_YEARISH.match(t) and len(t) >= 2 for t in fname):
+        return False
+    rest = [t for t in fname if not _YEARISH.match(t)]
+    if not rest:
+        return ALLOW_BARE_YEAR_FILENAME
+
+    def is_org(t: str) -> bool:
+        return t in toks or (len(t) >= 4 and any(s.startswith(t) for s in sig))
+
+    matched = [t for t in rest if is_org(t)]
+    leftover = [t for t in rest
+                if not is_org(t) and t not in _NAME_NOISE and t not in _ORG_STOP]
+    if matched and not leftover:
+        return True
+    # The filename may spell out what the org id abbreviates:
+    # "American Enterprise Institute 1999.pdf" -> aei
+    words = [t for t in rest
+             if t.isalpha() and t not in _ORG_STOP and t not in _NAME_NOISE]
+    return len(words) > 1 and "".join(w[0] for w in words) in toks
+
+
+def is_report_url(url: str, org_name: Optional[str] = None) -> bool:
+    """True if the URL's path looks like a published report.
+
+    Shared by the live crawl (URLFilter) and the Wayback seeder so the two
+    can't drift apart. `org_name` is optional: without it the org+year signal
+    is skipped and the other two still apply.
+    """
+    path = unquote(urlparse(url).path)
+    if any(k in path.lower() for k in REPORT_KEYWORDS):
+        return True
+    if "ar" in path_tokens(path):
+        return True
+    return bool(org_name) and _org_year_filename(path, org_name)
+
 
 # Static-asset extensions the live crawl should never follow. Following these
 # just burns the per-site page budget on files that can't contain report PDFs
@@ -129,7 +287,10 @@ class Config:
     all_pdfs: bool = False
     do_ocr: bool = False
     links_only: bool = True
-    sources: tuple[str, ...] = ("990", "wayback", "live")
+    sources: tuple[str, ...] = ("wayback", "live")
+    # Orgs crawled in parallel within each source lane. Orgs are different
+    # hosts, so this multiplies throughput without raising the per-host rate.
+    max_workers: int = 4
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -141,6 +302,7 @@ class Config:
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", cls.request_timeout)),
             max_depth=int(os.getenv("MAX_DEPTH", cls.max_depth)),
             max_pages_per_site=int(os.getenv("MAX_PAGES_PER_SITE", cls.max_pages_per_site)),
+            max_workers=int(os.getenv("MAX_WORKERS", cls.max_workers)),
             max_bytes=int(os.getenv("MAX_BYTES", cls.max_bytes)),
             output_dir=os.getenv("OUTPUT_DIR", cls.output_dir),
         )
@@ -188,7 +350,7 @@ def load_csv(file_path: str) -> pd.DataFrame:
 @dataclass
 class WorkItem:
     url: str
-    source: str                 # "990" | "wayback" | "live"
+    source: str                 # "wayback" | "live"
     org: str
     depth: int = 0
     expand: bool = False        # follow links found on this page?
@@ -204,7 +366,7 @@ class URLSeen:
         self._seen: set[str] = set()
 
     @staticmethod
-    def _norm(url: str) -> str:
+    def norm(url: str) -> str:
         url, _ = urldefrag(url)
         p = urlparse(url)
         return f"{p.scheme.lower()}://{p.netloc.lower()}{p.path.rstrip('/')}" + \
@@ -212,7 +374,7 @@ class URLSeen:
 
     def add(self, url: str) -> bool:
         """Add url; return True if it was new."""
-        key = self._norm(url)
+        key = self.norm(url)
         if key in self._seen:
             return False
         self._seen.add(key)
@@ -220,33 +382,68 @@ class URLSeen:
 
 
 class URLFrontier:
-    """FIFO queue -> breadth-first traversal. Dedup happens at ENQUEUE time so
-    duplicate discoveries never bloat the queue."""
+    """Two-tier FIFO -> breadth-first traversal, live before archive.
+
+    Live items share the primary queue; Wayback items go to a second queue that
+    is only drained once the primary one is empty. Because the live crawl feeds
+    its own discoveries back into the primary queue, the WHOLE live crawl
+    finishes before the first snapshot is fetched -- the archive backfills, it
+    doesn't race. Ordering only; nothing the live crawl finds suppresses a
+    Wayback record. Dedup happens at ENQUEUE time, per queue, so duplicate
+    discoveries never bloat either queue."""
 
     def __init__(self, seen: URLSeen) -> None:
-        self._q: deque[WorkItem] = deque()
+        self._q: deque[WorkItem] = deque()          # live
+        self._archive: deque[WorkItem] = deque()    # wayback -- drained last
         self._seen = seen
 
     def add(self, item: WorkItem) -> bool:
         if not self._seen.add(item.url):
             return False
-        self._q.append(item)
+        (self._archive if item.source == "wayback" else self._q).append(item)
         return True
 
     def next(self) -> WorkItem:
-        return self._q.popleft()
+        return (self._q or self._archive).popleft()
 
     def __len__(self) -> int:
-        return len(self._q)
+        return len(self._q) + len(self._archive)
 
 
 # ===========================================================================
 # Downloader -- polite, retrying fetch for HTML, JSON, and binary (PDF)
 # ===========================================================================
+class HostThrottle:
+    """Per-host rate limiting that is safe to share across threads.
+
+    Each host gets its own lock, held across the sleep, so two workers can
+    never both decide it is their turn on the same host -- while workers on
+    DIFFERENT hosts never block each other. Sharing one instance across every
+    worker is what keeps parallel orgs polite: each org is its own host and
+    runs at full rate, but web.archive.org is a single host that all the
+    wayback lanes hit, so it stays capped at one request per delay.
+    """
+
+    def __init__(self, delay: float) -> None:
+        self.delay = delay
+        self._meta = threading.Lock()
+        self._locks: dict[str, threading.Lock] = {}
+        self._last: dict[str, float] = {}
+
+    def wait(self, host: str) -> None:
+        with self._meta:
+            lock = self._locks.setdefault(host, threading.Lock())
+        with lock:
+            gap = self.delay - (time.time() - self._last.get(host, 0.0))
+            if gap > 0:
+                time.sleep(gap)
+            self._last[host] = time.time()
+
+
 class Downloader:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, throttle: Optional[HostThrottle] = None) -> None:
         self.cfg = cfg
-        self._last_hit: dict[str, float] = {}   # host -> last request time
+        self.throttle = throttle or HostThrottle(cfg.request_delay)
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": cfg.user_agent})
         if Retry is not None:
@@ -261,10 +458,7 @@ class Downloader:
             self.session.mount("https://", adapter)
 
     def _throttle(self, host: str) -> None:
-        wait = self.cfg.request_delay - (time.time() - self._last_hit.get(host, 0.0))
-        if wait > 0:
-            time.sleep(wait)
-        self._last_hit[host] = time.time()
+        self.throttle.wait(host)
 
     def get(self, url: str, params=None) -> Optional[requests.Response]:
         """Fetch a URL, streaming the body with a size cap so one mislabeled
@@ -333,7 +527,7 @@ class DNSResolver:
         return self._cache[host]
 
 
-# ===========================================================================
+# ==========================================================================
 # Robots -- fetched through OUR session (UA + timeout + throttle), cached
 # ===========================================================================
 class Robots:
@@ -436,12 +630,15 @@ class ContentStorage:
     FIELDNAMES = ["org", "source", "year", "url", "saved_path", "bytes",
                   "pages", "text_len", "scanned_or_ocr", "sha256", "collected_at"]
 
-    def __init__(self, out_dir: str) -> None:
+    def __init__(self, out_dir: str, manifest_name: str = "manifest.csv") -> None:
         self.out_dir = out_dir
         self.rows: list[dict] = []
         os.makedirs(out_dir, exist_ok=True)
-        self.manifest_csv = os.path.join(out_dir, "manifest.csv")
+        self.manifest_csv = os.path.join(out_dir, manifest_name)
         self._header_written = False
+        # One storage is shared by every org worker in a lane, so the streamed
+        # append has to be atomic or rows interleave mid-line on disk.
+        self._lock = threading.Lock()
         self._load_existing()
 
     def _load_existing(self) -> None:
@@ -485,6 +682,10 @@ class ContentStorage:
     def _append_row(self, row: dict) -> None:
         """Persist one row to manifest.csv right now, flushed to disk, so a
         crash / disconnect mid-crawl keeps everything collected so far."""
+        with self._lock:
+            self._append_row_locked(row)
+
+    def _append_row_locked(self, row: dict) -> None:
         self.rows.append(row)
         try:
             write_header = not self._header_written and (
@@ -561,7 +762,9 @@ class ContentStorage:
         df = df.sort_values(["org", "source", "year"],
                             key=lambda s: s.astype(str)).reset_index(drop=True)
         df.to_csv(self.manifest_csv, index=False)
-        df.to_json(os.path.join(self.out_dir, "manifest.json"),
+        # Derive the JSON name from the CSV so two lanes writing
+        # manifest_live/manifest_wayback don't collide on one manifest.json.
+        df.to_json(os.path.splitext(self.manifest_csv)[0] + ".json",
                    orient="records", indent=2)
         return df
 
@@ -587,9 +790,11 @@ class URLExtractor:
 # URL filter -- decide what is worth enqueuing / keeping
 # ===========================================================================
 class URLFilter:
-    def __init__(self, seed_domain: str, all_pdfs: bool = False) -> None:
+    def __init__(self, seed_domain: str, all_pdfs: bool = False,
+                 org_name: Optional[str] = None) -> None:
         self.seed_domain = registered_domain(seed_domain)
         self.all_pdfs = all_pdfs
+        self.org_name = org_name
 
     def same_site(self, url: str) -> bool:
         return registered_domain(urlparse(url).netloc) == self.seed_domain
@@ -599,10 +804,7 @@ class URLFilter:
         return urlparse(url).path.lower().endswith(".pdf")
 
     def looks_like_report(self, url: str) -> bool:
-        if self.all_pdfs:
-            return True
-        low = url.lower()
-        return any(k in low for k in REPORT_KEYWORDS)
+        return True if self.all_pdfs else is_report_url(url, self.org_name)
 
     def keep_pdf(self, url: str) -> bool:
         """A PDF is worth collecting if it's on-site and looks like a report."""
@@ -617,50 +819,8 @@ class URLFilter:
 
 
 # ===========================================================================
-# Seeders -- ProPublica + Wayback push URLs into the frontier
+# Seeder -- Wayback pushes archived URLs into the frontier
 # ===========================================================================
-def seed_propublica(org: dict, frontier: URLFrontier, downloader: Downloader,
-                    cfg: Config) -> None:
-    """Find the org's EIN (if not given) and enqueue every Form 990 PDF in window."""
-    oldest, _ = cfg.window_years()
-    ein = org.get("ein")
-
-    if not ein:
-        q = org.get("name") or org.get("domain", "")
-        data = downloader.get_json(PROPUBLICA_SEARCH, params={"q": q})
-        results = (data or {}).get("organizations", [])
-        if not results:
-            console.print(f"[yellow]ProPublica: no match for '{q}'[/yellow]")
-            return
-        ein = str(results[0]["ein"])
-        console.print(f"  ProPublica matched '{q}' -> EIN {ein} "
-                      f"({results[0].get('name', '?')}) "
-                      f"[dim](verify if unsure)[/dim]")
-
-    ein = re.sub(r"\D", "", str(ein))
-    data = downloader.get_json(PROPUBLICA_ORG.format(ein=ein))
-    if not data:
-        return
-    filings = (data.get("filings_with_data") or []) + \
-              (data.get("filings_without_data") or [])
-
-    queued = 0
-    for f in filings:
-        pdf = f.get("pdf_url")
-        if not pdf:
-            continue
-        yr = f.get("tax_prd_yr") or f.get("tax_prd")
-        try:
-            yr_int: Optional[int] = int(str(yr)[:4])
-        except (TypeError, ValueError):
-            yr_int = None
-        if yr_int and yr_int < oldest:
-            continue
-        if frontier.add(WorkItem(pdf, source="990", org=org["name"], year=yr_int)):
-            queued += 1
-    console.print(f"  ProPublica: queued {queued} Form 990 PDF(s)")
-
-
 def seed_wayback(org: dict, frontier: URLFrontier, downloader: Downloader,
                  cfg: Config) -> None:
     """Enqueue every archived PDF on the domain within the lookback window."""
@@ -691,7 +851,7 @@ def seed_wayback(org: dict, frontier: URLFrontier, downloader: Downloader,
     for rec in records:
         ts = rec[idx["timestamp"]]
         original = rec[idx["original"]]
-        if not cfg.all_pdfs and not any(k in original.lower() for k in REPORT_KEYWORDS):
+        if not cfg.all_pdfs and not is_report_url(original, org.get("name")):
             continue
         # `id_` returns the raw archived file with no Wayback wrapper.
         archived = f"https://web.archive.org/web/{ts}id_/{original}"
@@ -705,38 +865,49 @@ def seed_wayback(org: dict, frontier: URLFrontier, downloader: Downloader,
 # Crawler -> BFS -- the orchestrator that ties every component together
 # ===========================================================================
 class Crawler:
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, storage: "Optional[ContentStorage]" = None,
+                 throttle: Optional[HostThrottle] = None) -> None:
         self.cfg = cfg
         self.url_seen = URLSeen()
         self.frontier = URLFrontier(self.url_seen)
-        self.downloader = Downloader(cfg)
+        self.downloader = Downloader(cfg, throttle)
         self.dns = DNSResolver()
         self.parser = ContentParser()
         self.robots = Robots(self.downloader)
         self.content_seen = ContentSeen()
-        self.storage = ContentStorage(cfg.output_dir)
+        # A shared storage lets every org worker in a lane stream into one
+        # manifest; without one, each Crawler owns its own file as before.
+        self.storage = storage if storage is not None else ContentStorage(cfg.output_dir)
         self.extractor = URLExtractor()
         self._filters: dict[str, URLFilter] = {}   # org -> live-crawl filter
 
     # ---- per-org seeding ---------------------------------------------------
     def seed_org(self, org: dict) -> None:
-        console.print(f"[bold cyan]{org['name']}[/bold cyan] ({org.get('domain') or 'no domain'})")
-        if "990" in self.cfg.sources:
-            seed_propublica(org, self.frontier, self.downloader, self.cfg)
+        lane = "+".join(self.cfg.sources)
+        console.print(f"[dim]{lane}[/dim] [bold cyan]{org['name']}[/bold cyan] "
+                      f"({org.get('domain') or 'no domain'})")
         if not org.get("domain"):
-            return  # wayback + live both need a domain; 990 can run via EIN/name
-        if "wayback" in self.cfg.sources:
-            seed_wayback(org, self.frontier, self.downloader, self.cfg)
+            console.print(f"[yellow]'{org['name'] or '?'}' has no domain -- skipping.[/yellow]")
+            return  # wayback and live both need a domain to start from
+        # Live first, then wayback. The frontier enforces this ordering at
+        # crawl time regardless; seeding in the same order keeps the two from
+        # looking like they disagree.
         if "live" in self.cfg.sources:
-            self._filters[org["name"]] = URLFilter(org["domain"], self.cfg.all_pdfs)
+            self._filters[org["name"]] = URLFilter(org["domain"], self.cfg.all_pdfs,
+                                                  org.get("name"))
             self.frontier.add(WorkItem(f"https://{org['domain']}/", source="live",
                                        org=org["name"], depth=0, expand=True))
+        if "wayback" in self.cfg.sources:
+            seed_wayback(org, self.frontier, self.downloader, self.cfg)
 
     # ---- the BFS loop --------------------------------------------------------
-    def run(self) -> Optional[pd.DataFrame]:
+    def drain(self, pbar=None) -> None:
+        """Work the frontier to exhaustion. Does NOT write the manifest -- when
+        several orgs share one storage, the lane writes it once at the end."""
         pages_seen: dict[str, int] = {}   # org -> live pages fetched (breadth cap)
-        pbar = tqdm(desc="crawling", unit="url")
-
+        own_bar = pbar is None
+        if own_bar:
+            pbar = tqdm(desc="crawling", unit="url")
         try:
             while len(self.frontier):
                 item = self.frontier.next()
@@ -744,17 +915,25 @@ class Crawler:
                 self._process(item, pages_seen)
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted -- writing partial manifest.[/yellow]")
+            raise
         finally:
-            pbar.close()
+            if own_bar:
+                pbar.close()
 
+    def run(self) -> Optional[pd.DataFrame]:
+        """Drain and write this crawler's own manifest (single-crawler use)."""
+        try:
+            self.drain()
+        except KeyboardInterrupt:
+            pass
         return self.storage.write_manifest()
 
     def _process(self, item: WorkItem, pages_seen: dict[str, int]) -> None:
         url = item.url
 
-        # Links-only: known PDF URLs (990/wayback seeds, or .pdf links found on
-        # the live crawl) go straight to the manifest -- no fetch needed.
-        if self.cfg.links_only and (item.source in ("990", "wayback")
+        # Links-only: known PDF URLs (wayback seeds, or .pdf links found on the
+        # live crawl) go straight to the manifest -- no fetch needed.
+        if self.cfg.links_only and (item.source == "wayback"
                                     or URLFilter.is_pdf_url(url)):
             self.storage.record_link(org=item.org, source=item.source,
                                      year=item.year, url=url)
@@ -814,7 +993,7 @@ class Crawler:
         # One filter per org (built at seed time); fall back to the current
         # host if a redirect landed us somewhere we didn't seed.
         flt = self._filters.get(item.org) or URLFilter(urlparse(resp.url).netloc,
-                                                       self.cfg.all_pdfs)
+                                                       self.cfg.all_pdfs, item.org)
         for link in self.extractor.extract(soup, resp.url):
             if flt.is_pdf_url(link):
                 if flt.keep_pdf(link):
@@ -833,9 +1012,8 @@ class Crawler:
 def _row_to_org(row: pd.Series) -> dict:
     """Turn a DataFrame row (name, domain, ein) into the dict the crawler wants.
 
-    pandas fills missing cells with NaN; convert those (and blanks) to None so
-    seed_propublica's `org.get("ein")` falls through to search-by-name, and
-    strip any scheme/trailing slash off the domain.
+    pandas fills missing cells with NaN; convert those (and blanks) to None,
+    and strip any scheme/trailing slash off the domain.
     """
     def val(key: str) -> Optional[str]:
         if key not in row.index:
@@ -856,7 +1034,8 @@ def populate_data(orgs_df: Optional[pd.DataFrame], out_dir: str, sources,
                   years: int = 20, depth: int = 3,
                   start_row: int = 0, end_row: Optional[int] = None, *,
                   all_pdfs: bool = False, do_ocr: bool = False,
-                  links_only: bool = True) -> Optional[pd.DataFrame]:
+                  links_only: bool = True,
+                  max_workers: Optional[int] = None) -> Optional[pd.DataFrame]:
     """Run the crawler over a slice of an orgs DataFrame; return the manifest df.
 
     Same signature as before, but configuration now flows through a Config
@@ -878,20 +1057,90 @@ def populate_data(orgs_df: Optional[pd.DataFrame], out_dir: str, sources,
     cfg = replace(Config.from_env(), years_back=years, max_depth=depth,
                   output_dir=out_dir, sources=tuple(sources),
                   all_pdfs=all_pdfs, do_ocr=do_ocr, links_only=links_only)
+    workers = max(1, int(max_workers if max_workers is not None else cfg.max_workers))
+
+    orgs, skipped = [], []
+    for _, row in rows.iterrows():
+        org = _row_to_org(row)
+        (orgs if org["domain"] else skipped).append(org)
+    for org in skipped:
+        console.print(f"[yellow]'{org['name'] or '?'}' has no domain -- skipped.[/yellow]")
+    if not orgs:
+        console.print("[yellow]No orgs with a domain -- nothing to do.[/yellow]")
+        return None
 
     oldest, this_year = cfg.window_years()
     console.print(f"[bold]Collecting {oldest}-{this_year} for rows {start}:{end} "
-                  f"from sources: {', '.join(cfg.sources)}[/bold]")
+                  f"from sources: {', '.join(cfg.sources)} "
+                  f"({len(orgs)} orgs, {workers} at a time)[/bold]")
 
-    crawler = Crawler(cfg)
-    for _, row in rows.iterrows():
-        org = _row_to_org(row)
-        if not org["domain"] and ("live" in cfg.sources or "wayback" in cfg.sources):
-            console.print(f"[yellow]'{org['name'] or '?'}' has no domain -- "
-                          f"only the 990 source can run for it.[/yellow]")
-        crawler.seed_org(org)
+    return run_lanes(cfg, orgs, workers)
 
-    return crawler.run()
+
+def manifest_name(source: str) -> str:
+    """Each source writes its own manifest, so the two lanes never contend for
+    the same file and each stays independently resumable."""
+    return f"manifest_{source}.csv"
+
+
+def run_lanes(cfg: Config, orgs: list[dict], workers: int) -> Optional[pd.DataFrame]:
+    """Run one lane per source, concurrently, each parallelised across orgs.
+
+    Layout: the lanes share the org list and nothing else. Every org gets its
+    own Crawler -- so its own frontier, URL-seen set and page budget -- while
+    the lane's ContentStorage (one manifest per source) and a single global
+    HostThrottle are the only shared objects. That keeps per-host politeness
+    intact: orgs are distinct hosts and run at full rate, while every wayback
+    worker queues behind the same web.archive.org entry in the throttle.
+    """
+    throttle = HostThrottle(cfg.request_delay)
+    pbar = tqdm(desc="crawling", unit="url")
+    interrupted = threading.Event()
+
+    def crawl_org(lane_cfg: Config, org: dict) -> None:
+        if interrupted.is_set():
+            return
+        crawler = Crawler(lane_cfg, storage=lane_storage[lane_cfg.sources[0]],
+                          throttle=throttle)
+        try:
+            crawler.seed_org(org)
+            crawler.drain(pbar)
+        except KeyboardInterrupt:
+            interrupted.set()
+        except Exception as e:            # one bad org must not kill the lane
+            log.warning("org %r failed: %s", org.get("name"), e)
+            console.print(f"[yellow]'{org['name'] or '?'}' failed: {e}[/yellow]")
+
+    lane_storage = {src: ContentStorage(cfg.output_dir, manifest_name(src))
+                    for src in cfg.sources}
+
+    def lane(source: str) -> Optional[pd.DataFrame]:
+        lane_cfg = replace(cfg, sources=(source,))
+        with ThreadPoolExecutor(max_workers=workers,
+                                thread_name_prefix=source) as ex:
+            list(ex.map(lambda o: crawl_org(lane_cfg, o), orgs))
+        return lane_storage[source].write_manifest()
+
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, len(cfg.sources))) as lane_ex:
+            frames = list(lane_ex.map(lane, cfg.sources))
+    except KeyboardInterrupt:
+        interrupted.set()
+        console.print("\n[yellow]Interrupted -- writing partial manifests.[/yellow]")
+        frames = [st.write_manifest() for st in lane_storage.values()]
+    finally:
+        pbar.close()
+
+    frames = [f for f in frames if f is not None and len(f)]
+    for src in cfg.sources:
+        path = os.path.join(cfg.output_dir, manifest_name(src))
+        if os.path.exists(path):
+            console.print(f"  [bold]{src}[/bold]: {path}")
+        else:
+            console.print(f"  [yellow]{src}: nothing collected[/yellow]")
+    if not frames:
+        return None
+    return pd.concat(frames, ignore_index=True)
 
 
 # ===========================================================================
@@ -902,19 +1151,21 @@ SAMPLE = [
     {"name": "Whitney Museum of American Art", "domain": "whitney.org"},
 ]
 
-
+ 
 def main() -> None:
     env_cfg = Config.from_env()
     ap = argparse.ArgumentParser(
-        description="Collect nonprofit annual reports (990s + published PDFs) over ~20 years.")
+        description="Collect nonprofit published annual reports over ~20 years.")
     ap.add_argument("--orgs", help="Path to orgs JSON file")
     ap.add_argument("--out", default=env_cfg.output_dir, help="Output directory")
     ap.add_argument("--years", type=int, default=env_cfg.years_back,
                     help="Lookback window in years")
-    ap.add_argument("--sources", default="990,wayback,live",
-                    help="Comma list of sources to run: 990,wayback,live")
+    ap.add_argument("--sources", default="wayback,live",
+                    help="Comma list of sources to run: wayback,live")
     ap.add_argument("--depth", type=int, default=env_cfg.max_depth,
                     help="Live-crawl link depth")
+    ap.add_argument("--workers", type=int, default=env_cfg.max_workers,
+                    help="Orgs to crawl in parallel per source (default: 4)")
     ap.add_argument("--all-pdfs", action="store_true",
                     help="Keep every PDF, not just ones whose URL looks like a report")
     ap.add_argument("--download", action="store_true",
@@ -942,27 +1193,30 @@ def main() -> None:
         orgs = json.load(f)
 
     sources = tuple(s.strip() for s in args.sources.split(",") if s.strip())
-    unknown = set(sources) - {"990", "wayback", "live"}
+    unknown = set(sources) - {"wayback", "live"}
     if unknown:
         ap.error(f"unknown source(s): {', '.join(sorted(unknown))}")
 
     cfg = replace(env_cfg, years_back=args.years, max_depth=args.depth,
                   output_dir=args.out, sources=sources, all_pdfs=args.all_pdfs,
-                  do_ocr=args.ocr, links_only=not args.download)
+                  do_ocr=args.ocr, links_only=not args.download,
+                  max_workers=max(1, args.workers))
 
     oldest, this_year = cfg.window_years()
     console.print(f"[bold]Collecting {oldest}-{this_year} "
-                  f"from sources: {', '.join(sources)}[/bold]\n")
+                  f"from sources: {', '.join(sources)} "
+                  f"({cfg.max_workers} orgs at a time)[/bold]\n")
 
-    crawler = Crawler(cfg)
     for org in orgs:
         org.setdefault("name", org.get("domain", ""))
-        crawler.seed_org(org)
+    with_domain = [o for o in orgs if o.get("domain")]
+    for o in orgs:
+        if not o.get("domain"):
+            console.print(f"[yellow]'{o.get('name') or '?'}' has no domain -- skipped.[/yellow]")
 
-    df = crawler.run()
+    df = run_lanes(cfg, with_domain, cfg.max_workers)
     if df is not None:
-        console.print(f"\n[green]Done. {len(df)} documents.[/green] "
-                      f"Manifest: {os.path.join(cfg.output_dir, 'manifest.csv')}")
+        console.print(f"\n[green]Done. {len(df)} documents.[/green]")
         cols = [c for c in ("org", "source", "year", "pages", "saved_path", "url")
                 if c in df.columns]
         console.print(df[cols].to_string(index=False))

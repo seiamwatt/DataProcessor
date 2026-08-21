@@ -205,13 +205,49 @@ def config_panel(cfg: dict, n_orgs: int) -> Panel:
     )
 
 
-def running_panel(cfg: dict, started: float) -> Panel:
+# Up to `workers x lanes` rows are open at once, so a high --workers could
+# push the panel off screen. Show the lowest-numbered few and count the rest.
+MAX_ACTIVE_SHOWN = 6
+
+
+def _active_rows(active: list[dict]) -> Text:
+    """Render the rows in flight, one line each.
+
+    Orgs are crawled in parallel across both lanes, so several rows are always
+    open at once -- listing them beats picking one and calling it "current".
+    """
+    shown, hidden = active[:MAX_ACTIVE_SHOWN], len(active) - MAX_ACTIVE_SHOWN
+    out = Text()
+    for i, a in enumerate(shown):
+        if i:
+            out.append("\n")
+        row = "?" if a["row"] is None else str(a["row"])
+        out.append(f"row {row}", style=f"bold {ACCENT}")
+        out.append(f"  {a['name']}", style=INK)
+        out.append(f"  [{a['lane']}]", style=MUTED)
+    if hidden > 0:
+        out.append(f"\n+{hidden} more", style=MUTED)
+    return out
+
+
+def running_panel(cfg: dict, started: float, progress=None) -> Panel:
     n = cfg["end_row"] - cfg["start_row"]
+    snap = progress.snapshot() if progress is not None else None
     body = Table(box=None, show_header=False, pad_edge=False)
     body.add_column(style=MUTED, justify="right", no_wrap=True)
     body.add_column(style=INK)
-    body.add_row("Status", Text("Crawling in progress", style=f"bold {ACCENT}"))
-    body.add_row("Organizations", f"{n}  (rows {cfg['start_row']}\u2013{cfg['end_row']})")
+
+    if snap and snap["active"]:
+        body.add_row("Status", _active_rows(snap["active"]))
+    else:
+        # Before the first org is picked up, and in the gap after the last one
+        # finishes while the manifests are written.
+        waiting = "Starting up" if not snap or not snap["total"] else "Wrapping up"
+        body.add_row("Status", Text(waiting, style=f"bold {ACCENT}"))
+
+    done = f"{snap['done']}/{snap['total']} done  \u00b7  " if snap and snap["total"] else ""
+    body.add_row("Organizations",
+                 f"{done}{n} in range (rows {cfg['start_row']}\u2013{cfg['end_row']})")
     body.add_row("Sources", " \u00b7 ".join(cfg["sources"]))
     body.add_row("Elapsed", fmt_duration(time.monotonic() - started))
     return Panel(body, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]Spider running[/]", padding=(1, 2))
@@ -327,14 +363,17 @@ def run_crawl(cfg: dict):
 
     # Live status card with an elapsed clock while the spider works.
     # (populate_data blocks, so we refresh the clock from the render callable.)
-    with Live(running_panel(cfg, started), console=console, refresh_per_second=2) as live:
+    progress = spider.CrawlProgress()
+
+    with Live(running_panel(cfg, started, progress), console=console,
+              refresh_per_second=2) as live:
         import threading
 
         stop = threading.Event()
 
         def tick():
             while not stop.is_set():
-                live.update(running_panel(cfg, started))
+                live.update(running_panel(cfg, started, progress))
                 stop.wait(0.5)
 
         t = threading.Thread(target=tick, daemon=True)
@@ -348,6 +387,7 @@ def run_crawl(cfg: dict):
                 depth=cfg["depth"],
                 start_row=cfg["start_row"],
                 end_row=cfg["end_row"],
+                progress=progress,
             )
         finally:
             stop.set()

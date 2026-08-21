@@ -58,6 +58,7 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import Iterator, Optional
@@ -884,7 +885,9 @@ class Crawler:
     # ---- per-org seeding ---------------------------------------------------
     def seed_org(self, org: dict) -> None:
         lane = "+".join(self.cfg.sources)
-        console.print(f"[dim]{lane}[/dim] [bold cyan]{org['name']}[/bold cyan] "
+        row = org.get("row")
+        label = "" if row is None else f"[dim]row {row}[/dim] "
+        console.print(f"[dim]{lane}[/dim] {label}[bold cyan]{org['name']}[/bold cyan] "
                       f"({org.get('domain') or 'no domain'})")
         if not org.get("domain"):
             console.print(f"[yellow]'{org['name'] or '?'}' has no domain -- skipping.[/yellow]")
@@ -1009,11 +1012,14 @@ class Crawler:
 # ===========================================================================
 # Programmatic entry point -- used by the questionary UI (spider_UI.py)
 # ===========================================================================
-def _row_to_org(row: pd.Series) -> dict:
+def _row_to_org(row: pd.Series, row_no: Optional[int] = None) -> dict:
     """Turn a DataFrame row (name, domain, ein) into the dict the crawler wants.
 
     pandas fills missing cells with NaN; convert those (and blanks) to None,
-    and strip any scheme/trailing slash off the domain.
+    and strip any scheme/trailing slash off the domain. `row_no` is the org's
+    absolute position in the source CSV -- carried through so progress
+    reporting can name the row the user typed into start/end, not a
+    re-numbered offset into the slice.
     """
     def val(key: str) -> Optional[str]:
         if key not in row.index:
@@ -1027,7 +1033,92 @@ def _row_to_org(row: pd.Series) -> dict:
     domain = re.sub(r"^https?://", "", val("domain") or "", flags=re.I).strip("/").lower()
     # Fall back to the domain when no name column is present, so each org still
     # gets its own folder/manifest label instead of collapsing into "org".
-    return {"name": val("name") or domain or "", "domain": domain, "ein": val("ein")}
+    return {"name": val("name") or domain or "", "domain": domain,
+            "ein": val("ein"), "row": row_no}
+
+
+class CrawlProgress:
+    """Thread-safe record of which CSV rows are being crawled right now.
+
+    Orgs run in parallel across both lanes, so there is no single "current
+    row" -- at any moment `workers x lanes` of them are in flight. The
+    crawler only marks rows started and finished; `snapshot()` hands a
+    consistent picture to whatever is rendering (the UI's status panel), so
+    the reader never has to lock anything.
+
+    Counted in orgs, not org-lane passes: an org is done once every lane has
+    released it, which is what "row 12 finished" means to someone watching.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.total = 0
+        self.done = 0
+        self.lanes = 1
+        self._active: dict[tuple, dict] = {}   # (row, lane) -> org label
+        self._left: dict[object, int] = {}     # row -> lanes still to finish
+        self._rows: list[int] = []             # every row in this run, in order
+        self._finished: set[int] = set()       # rows done on every lane
+
+    def begin(self, orgs: list[dict], lanes: int) -> None:
+        """Called once the org list and lane count are known."""
+        with self._lock:
+            self.total = len(orgs)
+            self.done = 0
+            self.lanes = max(1, lanes)
+            self._active.clear()
+            self._left = {self._key(o): self.lanes for o in orgs}
+            self._rows = sorted(o["row"] for o in orgs if o.get("row") is not None)
+            self._finished.clear()
+
+    @staticmethod
+    def _key(org: dict) -> object:
+        # Orgs loaded from JSON have no row number; fall back to the name so
+        # each still gets its own slot instead of colliding on None.
+        row = org.get("row")
+        return row if row is not None else org.get("name", "")
+
+    @contextmanager
+    def track(self, org: dict, lane: str):
+        """Mark one org in flight on one lane for the duration of the block."""
+        key = self._key(org)
+        with self._lock:
+            self._active[(key, lane)] = {"row": org.get("row"),
+                                         "name": org.get("name") or "?",
+                                         "lane": lane}
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._active.pop((key, lane), None)
+                left = self._left.get(key, 1) - 1
+                self._left[key] = left
+                if left <= 0:
+                    self.done += 1
+                    if org.get("row") is not None:
+                        self._finished.add(org["row"])
+
+    def resume_row(self) -> Optional[int]:
+        """The row to restart from: the lowest one not finished on every lane.
+
+        Orgs are dispatched in order but complete out of order, so after an
+        interrupt the done/not-done boundary is ragged -- rows above this one
+        may already be complete. Restarting here re-crawls a handful of orgs
+        rather than risking a gap; the manifest dedupes on (org, source, url),
+        so the repeats cost requests, not duplicate rows.
+        """
+        with self._lock:
+            for row in self._rows:
+                if row not in self._finished:
+                    return row
+            return None
+
+    def snapshot(self) -> dict:
+        """A point-in-time copy: active rows sorted by row number, and counts."""
+        with self._lock:
+            active = sorted(self._active.values(),
+                            key=lambda a: (a["row"] is None, a["row"], a["lane"]))
+            return {"total": self.total, "done": self.done, "active": active}
 
 
 def populate_data(orgs_df: Optional[pd.DataFrame], out_dir: str, sources,
@@ -1035,7 +1126,8 @@ def populate_data(orgs_df: Optional[pd.DataFrame], out_dir: str, sources,
                   start_row: int = 0, end_row: Optional[int] = None, *,
                   all_pdfs: bool = False, do_ocr: bool = False,
                   links_only: bool = True,
-                  max_workers: Optional[int] = None) -> Optional[pd.DataFrame]:
+                  max_workers: Optional[int] = None,
+                  progress: Optional["CrawlProgress"] = None) -> Optional[pd.DataFrame]:
     """Run the crawler over a slice of an orgs DataFrame; return the manifest df.
 
     Same signature as before, but configuration now flows through a Config
@@ -1060,11 +1152,14 @@ def populate_data(orgs_df: Optional[pd.DataFrame], out_dir: str, sources,
     workers = max(1, int(max_workers if max_workers is not None else cfg.max_workers))
 
     orgs, skipped = [], []
-    for _, row in rows.iterrows():
-        org = _row_to_org(row)
+    for offset, (_, row) in enumerate(rows.iterrows()):
+        # Absolute CSV position, so a reported row matches the start/end the
+        # user typed rather than an offset into the slice.
+        org = _row_to_org(row, start + offset)
         (orgs if org["domain"] else skipped).append(org)
     for org in skipped:
-        console.print(f"[yellow]'{org['name'] or '?'}' has no domain -- skipped.[/yellow]")
+        console.print(f"[yellow]row {org['row']}: '{org['name'] or '?'}' "
+                      f"has no domain -- skipped.[/yellow]")
     if not orgs:
         console.print("[yellow]No orgs with a domain -- nothing to do.[/yellow]")
         return None
@@ -1074,7 +1169,7 @@ def populate_data(orgs_df: Optional[pd.DataFrame], out_dir: str, sources,
                   f"from sources: {', '.join(cfg.sources)} "
                   f"({len(orgs)} orgs, {workers} at a time)[/bold]")
 
-    return run_lanes(cfg, orgs, workers)
+    return run_lanes(cfg, orgs, workers, progress)
 
 
 def manifest_name(source: str) -> str:
@@ -1083,7 +1178,8 @@ def manifest_name(source: str) -> str:
     return f"manifest_{source}.csv"
 
 
-def run_lanes(cfg: Config, orgs: list[dict], workers: int) -> Optional[pd.DataFrame]:
+def run_lanes(cfg: Config, orgs: list[dict], workers: int,
+              progress: Optional[CrawlProgress] = None) -> Optional[pd.DataFrame]:
     """Run one lane per source, concurrently, each parallelised across orgs.
 
     Layout: the lanes share the org list and nothing else. Every org gets its
@@ -1096,15 +1192,20 @@ def run_lanes(cfg: Config, orgs: list[dict], workers: int) -> Optional[pd.DataFr
     throttle = HostThrottle(cfg.request_delay)
     pbar = tqdm(desc="crawling", unit="url")
     interrupted = threading.Event()
+    # Always track, even with no UI attached: the interrupt handler needs the
+    # done/not-done boundary to tell the user where to resume.
+    progress = progress or CrawlProgress()
+    progress.begin(orgs, len(cfg.sources))
 
     def crawl_org(lane_cfg: Config, org: dict) -> None:
         if interrupted.is_set():
             return
-        crawler = Crawler(lane_cfg, storage=lane_storage[lane_cfg.sources[0]],
-                          throttle=throttle)
+        lane = lane_cfg.sources[0]
+        crawler = Crawler(lane_cfg, storage=lane_storage[lane], throttle=throttle)
         try:
-            crawler.seed_org(org)
-            crawler.drain(pbar)
+            with progress.track(org, lane):
+                crawler.seed_org(org)
+                crawler.drain(pbar)
         except KeyboardInterrupt:
             interrupted.set()
         except Exception as e:            # one bad org must not kill the lane
@@ -1116,20 +1217,38 @@ def run_lanes(cfg: Config, orgs: list[dict], workers: int) -> Optional[pd.DataFr
 
     def lane(source: str) -> Optional[pd.DataFrame]:
         lane_cfg = replace(cfg, sources=(source,))
-        with ThreadPoolExecutor(max_workers=workers,
-                                thread_name_prefix=source) as ex:
+        ex = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=source)
+        try:
             list(ex.map(lambda o: crawl_org(lane_cfg, o), orgs))
+        finally:
+            # cancel_futures drops orgs that never started; crawl_org's own
+            # `interrupted` check covers the ones already handed to a worker.
+            ex.shutdown(wait=True, cancel_futures=True)
         return lane_storage[source].write_manifest()
 
+    # NOTE: the executor is NOT used as a context manager here. `with` runs
+    # shutdown(wait=True) during exception unwinding, which joins every lane
+    # thread BEFORE the except clause can set `interrupted` -- so Ctrl-C used
+    # to be swallowed and the whole org list ran to completion. Setting the
+    # flag first is what makes the interrupt take effect.
+    lane_ex = ThreadPoolExecutor(max_workers=max(1, len(cfg.sources)))
+    frames: list = []
     try:
-        with ThreadPoolExecutor(max_workers=max(1, len(cfg.sources))) as lane_ex:
-            frames = list(lane_ex.map(lane, cfg.sources))
+        frames = list(lane_ex.map(lane, cfg.sources))
     except KeyboardInterrupt:
         interrupted.set()
-        console.print("\n[yellow]Interrupted -- writing partial manifests.[/yellow]")
-        frames = [st.write_manifest() for st in lane_storage.values()]
+        console.print("\n[yellow]Interrupted -- finishing the orgs already in "
+                      "flight, then writing partial manifests.[/yellow]")
     finally:
+        lane_ex.shutdown(wait=True, cancel_futures=True)
         pbar.close()
+
+    if interrupted.is_set():
+        frames = [st.write_manifest() for st in lane_storage.values()]
+        resume = progress.resume_row()
+        if resume is not None:
+            console.print(f"[bold]Resume with start row {resume}[/bold] "
+                          f"[dim](rows at or above it may be incomplete)[/dim]")
 
     frames = [f for f in frames if f is not None and len(f)]
     for src in cfg.sources:
@@ -1207,8 +1326,9 @@ def main() -> None:
                   f"from sources: {', '.join(sources)} "
                   f"({cfg.max_workers} orgs at a time)[/bold]\n")
 
-    for org in orgs:
+    for i, org in enumerate(orgs):
         org.setdefault("name", org.get("domain", ""))
+        org.setdefault("row", i)   # position in orgs.json, so logs name a row
     with_domain = [o for o in orgs if o.get("domain")]
     for o in orgs:
         if not o.get("domain"):

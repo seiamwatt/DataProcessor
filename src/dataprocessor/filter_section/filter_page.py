@@ -35,6 +35,7 @@ import boto3
 from botocore.exceptions import ClientError
 import pytz
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from dataprocessor.filter_section import report_filter_llm
 from dataprocessor.filter_section import report_filter_pattern
@@ -260,24 +261,35 @@ def show():
                 time_start = time.time()
                 task1 = progress.add_task("Filtering data", total=total_rows)
 
-                for i in range(0, len(df_subset)):
-                    row = df_subset.iloc[i]
-                    pdf_url = row[col_name]
+                BATCH = 10
 
-                    is_report = report_filter_pattern.identify_reports(pdf_url)
+                for i in range(0,len(df_subset),BATCH):
+                    rows = []
+                    futures = []
+                    batch = df_subset.iloc[i:i + BATCH]
 
-                    result_row = row.copy()
-                    result_row["is_annual_report"] = is_report
-                    batch_result = pd.DataFrame([result_row])
+                    with ThreadPoolExecutor(max_workers = BATCH) as executor:
+                        for j in range(len(batch)):
+                            pdf_url = batch.iloc[j][col_name]
+                            future = executor.submit(report_filter_pattern.identify_reports,pdf_url)
+                            futures.append(future)
+
+
+                    for j in range(len(batch)):
+                        result_row = batch.iloc[j].copy()
+                        result_row["is_annual_report"] = futures[j].result()
+                        rows.append(result_row)
+
+                    batch_result = pd.DataFrame(rows)
 
                     if os.path.exists(output_path):
                         write_header = False
                     else:
                         write_header = True
 
-                    batch_result.to_csv(output_path, mode='a', header=write_header, index=False)
-                    row_track += 1
-                    progress.update(task1, advance=1)
+                    batch_result.to_csv(output_path,mode='a',header=write_header,index=False)
+                    row_track += len(batch)
+                    progress.update(task1,advance=len(batch))
 
                 id = str(uuid.uuid4())
                 progress.stop()

@@ -28,7 +28,23 @@ KEY_WORDS = {
     "annual impact report",
     "annual review",
     "annual-review",
-    "ar"
+    "ar",
+    "impact report",
+    "impact reports",
+    "impact-report",
+    "impact_report",
+    "impactreport",
+    "presidential report",
+    "presidential-report",
+    "presidential_report",
+    "presidentialreport",
+    "president's report",
+    "president’s report",      # curly apostrophe — PDF extraction emits this
+    "presidents report",
+    "presidents-report",
+    "presidents_report",
+    "presidentsreport",
+    "president report",
 }
 
 # Full phrases that name the document explicitly. Any one of these is enough.
@@ -43,6 +59,17 @@ STRONG_INDICATORS = {
     "annual report and financial statements",
     "annual impact report",
     "annual report highlights",
+    "this impact report",
+    "our impact report",
+    "the impact report of",
+    "impact report highlights",
+    "this presidential report",
+    "our president's report",
+    "our president’s report",
+    "the president's report",
+    "the president’s report",
+    "report of the president",
+    "report from the president",
 }
 
 def load_csv(file_path):

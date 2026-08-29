@@ -106,30 +106,6 @@ log = logging.getLogger("nonprofit_reports")
 
 WAYBACK_CDX = "https://web.archive.org/cdx/search/cdx"
 
-# ---------------------------------------------------------------------------
-# "Does this URL look like a published annual report?"  (disable with --all-pdfs)
-#
-# Three independent signals, scored against the 452 confirmed reports in
-# util/temp_resources/Agg_pilot.xlsx -- see util/score_report_filter.py, which
-# re-runs the numbers quoted here:
-#
-#   1. keyword   -- "annual" / "report" anywhere in the path
-#   2. ar-token  -- "ar" standing alone as a token
-#   3. org+year  -- the filename is the org's name/acronym next to a year and
-#                   nothing else
-#
-# Recall on real report URLs 95.7% -> 98.3%, on publisher filenames 55.9% ->
-# 91.2%, with no measured precision loss against same-site non-reports.
-# ---------------------------------------------------------------------------
-
-# Matched against the URL PATH -- directories included, not just the filename.
-# Plenty of real reports have an opaque filename that only the directory
-# identifies: /media/annual_report/2011/essay_3.pdf,
-# /annualreports/LEAR2004_pdf/Complete.pdf. Scoring against a set of confirmed
-# reports, path-matching beats filename-matching by ~28 points of recall.
-#
-# Substring match, so "annual" already covers annualreport, annual-report,
-# annual_report, annual%20report (unquoted first), annual-update, 2002_annual.
 REPORT_KEYWORDS = ("annual", "report")
 
 _RUN = re.compile(r"[A-Z]+|[a-z]+|\d+")

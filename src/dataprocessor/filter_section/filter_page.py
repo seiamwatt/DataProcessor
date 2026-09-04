@@ -170,7 +170,7 @@ def show():
                 filter_type_pattern = questionary.confirm("Filter by pattern?",style=PROMPT_STYLE).ask()
 
                 output_path = questionary.path("Output CSV file:", style=PROMPT_STYLE).ask()
-                batch_size = questionary.text("Batch size", style=PROMPT_STYLE).ask()
+                # batch_size = questionary.text("Batch size", style=PROMPT_STYLE).ask()
                 start_row = questionary.text("Start row", default=str(0), style=PROMPT_STYLE).ask()
                 end_row = questionary.text("End row", default=str(default_end_row), style=PROMPT_STYLE).ask()
                 col_name = questionary.text("Column name", default="pdf_url", style=PROMPT_STYLE).ask()
@@ -178,7 +178,6 @@ def show():
 
                 start_row = int(start_row)
                 end_row = int(end_row)
-                batch_size = int(batch_size)
                 input_status = False
             except Exception as e:
                 console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Check the file path and ensure numeric fields contain whole numbers, then try again.[/]")
@@ -190,8 +189,8 @@ def show():
                 return
 
             df_subset = df.iloc[start_row:end_row]
-            all_results = []
-            total_batches = (len(df_subset) + batch_size - 1) // batch_size
+            BATCH = 10
+            total_batches = (len(df_subset) + BATCH - 1) // BATCH
 
             console.print(Rule("Processing", style=ACCENT))
 
@@ -210,27 +209,42 @@ def show():
                 time_start = time.time()
                 task1 = progress.add_task("Filtering data", total=total_batches)
 
-                for i in range(0, len(df_subset), batch_size):
-                    batch_num = i // batch_size + 1
-                    progress.update(task1, description=f"Batch {batch_num} of {total_batches}  |  Row {row_track}")
+                for i in range(0,len(df_subset),BATCH):
+                    rows = []
+                    futures = []
+                    batch = df_subset.iloc[i:i + BATCH]
 
-                    batch = df_subset.iloc[i:i+batch_size]
-                    batch_result = report_filter_llm.batch_processing(df_batch=batch, api_key=api_key, pdf_url_column=col_name, extract_text=True)
+                    with ThreadPoolExecutor(max_workers=BATCH) as executor:
+                        for j in range(len(batch)):
+                            pdf_url = batch.iloc[j][col_name]
+
+                            try:
+                                future = executor.submit(report_filter_llm.identify_reports,pdf_url,api_key)
+                                futures.append(future)
+                            except Exception as e:
+                                print(e)
+                           
+
+                    for j in range(len(batch)):
+                        result_row = batch.iloc[j].copy()
+                        result_row["is_annual_report"] = futures[j].result()
+                        rows.append(result_row)
+
+                    batch_result = pd.DataFrame(rows)
+                    batch_result["is_annual_report"] = batch_result["is_annual_report"].astype("Int64")
 
                     if os.path.exists(output_path):
                         write_header = False
-                    else:
+                    else: 
                         write_header = True
 
-                    batch_result.to_csv(output_path, mode='a', header=write_header, index=False)
-
-                    row_track = row_track + 1
-                    progress.update(task1, advance=1)
+                    batch_result.to_csv(output_path,mode = 'a',header=write_header,index=False)
+                    row_track += len(batch)
+                    progress.update(task1,advance=1)
 
                 id = str(uuid.uuid4())
                 progress.stop()
                 time_elapsed = time.time() - time_start
-                data_to_log = [id, start_row, end_row, time_elapsed]
 
             # S3 upload (outside Progress block)
             console.print(run_summary_panel(id, start_row, end_row, time_elapsed, output_path))
@@ -246,7 +260,7 @@ def show():
 
             console.print(Rule("Processing", style=ACCENT))
             row_track = start_row
-            all_results = []
+            
 
             with Progress(
                 SpinnerColumn(style=ACCENT),
@@ -281,6 +295,7 @@ def show():
                         rows.append(result_row)
 
                     batch_result = pd.DataFrame(rows)
+                    batch_result["is_annual_report"] = batch_result["is_annual_report"].astype("Int64")
 
                     if os.path.exists(output_path):
                         write_header = False

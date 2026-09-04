@@ -100,8 +100,8 @@ PDF URL: {pdf_url}
 Document text (first few pages):
 {pdf_text}
 
-Respond with ONLY a JSON object in this exact format:
-{{"is_annual_report": true/false, "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}}
+Respond with ONLY a JSON object in this exact format: 1 for True and 0 for False
+{{"is_annual_report": 1/0, "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}}
 
 For the "year" field:
 - Use a 4-digit integer (e.g. 2023) if you can determine the year
@@ -118,8 +118,8 @@ Also identify the YEAR the annual report covers based on any clues in the URL (e
 
 PDF URL: {pdf_url}
 
-Respond with ONLY a JSON object in this exact format:
-{{"is_annual_report": true/false, "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}}
+Respond with ONLY a JSON object in this exact format: 1 for True and 0 for False
+{{"is_annual_report": 1/0, "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}}
 
 For the "year" field:
 - Use a 4-digit integer (e.g. 2023) if you can determine the year of the report
@@ -164,6 +164,22 @@ def DeepSeek_Connect(api_key, prompt, model="deepseek-v4-pro"):
 
     except Exception as e:
         print(f"error connecting to deepseek: {e}")
+        return None
+
+def identify_reports(pdf_url,api_key):
+    try:
+        extracted_text = extract_pdf_text(pdf_url=pdf_url)
+
+        prompt = create_prompt(pdf_url,extracted_text)
+        response = DeepSeek_Connect(api_key,prompt)
+        if response is None:
+            return None
+
+        if response.get("is_annual_report",0) == 1:
+            return 1
+        return 0
+    except Exception as e:
+        print(e)
         return None
 
 

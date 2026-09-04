@@ -134,7 +134,7 @@ def normalise(text):
     return re.sub(r"\s+", " ", text.lower())
 
 def identify_reports(pdf_url):
-    """True when the PDF names itself an annual report.
+    """1 when the PDF names itself an annual report, 0 otherwise.
 
     Nonprofit vocabulary alone is not enough — a 990, an appeal letter and a
     newsletter all use it. The document has to say what it is.
@@ -142,15 +142,15 @@ def identify_reports(pdf_url):
     extracted_text = extract_pdf_text(pdf_url)
 
     if not extracted_text:
-        return False
+        return 0
 
     text = normalise(extracted_text)
 
     for phrase in KEY_WORDS | STRONG_INDICATORS:
         if phrase in text:
-            return True
+            return 1
 
-    return False
+    return 0
 
 
 

@@ -127,7 +127,7 @@ For the "year" field:
 
     return prompt
 
-MODEL = "deepseek-ai/DeepSeek-V4.1-Flash"
+MODEL = "deepseek-flash"
 def DeepSeek_Connect(api_key, prompt, model=MODEL):
 
     try:
@@ -143,6 +143,8 @@ def DeepSeek_Connect(api_key, prompt, model=MODEL):
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 2000,
             "temperature": 0,
+            "thinking" : {"type":"disabled"},
+            "response_format": {"type":"json_object"}
         }
 
         response = requests.post(api_url, headers=headers, json=payload, timeout=60)

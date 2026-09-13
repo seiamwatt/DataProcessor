@@ -51,7 +51,7 @@ def extract_pdf_text(pdf_url, max_pages=15):
 
         response = requests.get(pdf_url, timeout=30)
         response.raise_for_status()
-        time.sleep(30)
+       
 
         pdf_file = BytesIO(response.content)
         pdf_reader = PyPDF2.PdfReader(pdf_file)

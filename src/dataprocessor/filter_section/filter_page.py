@@ -189,7 +189,7 @@ def show():
                 return
 
             df_subset = df.iloc[start_row:end_row]
-            BATCH = 10
+            BATCH = 100
             total_batches = (len(df_subset) + BATCH - 1) // BATCH
 
             console.print(Rule("Processing", style=ACCENT))

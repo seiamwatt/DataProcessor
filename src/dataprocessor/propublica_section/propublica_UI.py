@@ -87,7 +87,6 @@ def args_table() -> Table:
         title="Run parameters",
         title_style=f"bold {ACCENT}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
         border_style=MUTED,
         header_style=f"bold {ACCENT}",
         pad_edge=False,

@@ -21,6 +21,7 @@ from dataprocessor.analysisPDF_v2_section import analysisPDF_v2
 from dataprocessor.analysisPDF_v2_section import analysisPDF_v2_page
 from dataprocessor.propublica_section import propublica_UI
 from dataprocessor.propublica_cloud_section import propublica_cloud_UI
+from dataprocessor.propublica_domain_finder_section import domain_finder_UI
 from dataprocessor.Spider_section import spider_UI
 # SETUP ---------------------------------------------------------------------------
 
@@ -29,32 +30,55 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------------------------
 # MAIN UI -------------------------------------------------------------------------
+ANALYSIS_SECTION = "Analysis Section"
+PROPUBLICA_SECTION = "Propublica Section"
+SPIDER_SECTION = "Spider Section"
+
+
+FILTER_PAGE = "Filter data"
+LLM_ANALYSIS_URL = "LLM Analysis - url"
+LLM_ANALYSIS_PDF = "LLM Analysis - pdf"
+LLM_ANALYSIS_URL_V2 = "LLM Analysis - url"
+LLM_ANALYSIS_PDF_V2 = "LLM Analysis - pdf"
+PROPUBLICA_ORG_FINDER = "Probulica API ORG Finder"
+PROPUBLICA_DOMAIN_FINDER = "Propublica domain finder"
+SPIDER_V1 = "Spider v1"
+SPIDER_V2 = "Spider v2"
+SETTINGS = "Settings"
+
 
 
 def main():
+    
+
     main_page.show()
-    choice = questionary.select("Select terminal",choices=["Filter Data","LLM Analysis - PDF URL","LLM Analysis - Raw PDF","LLM Analysis V2","LLM Analysis V2 - Raw PDF","Propublica API","Propublica API [CLOUD]","Spider","Settings"]).ask()
 
-    if choice == "Filter Data":
-        os.system("cls" if os.name == "nt" else "clear")
+    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,SETTINGS]).ask()
+
+    if choice == FILTER_PAGE:
         filter_page.show()
-    elif choice == "LLM Analysis - PDF URL":
-        analysis_page.show()
-    elif choice == "LLM Analysis - Raw PDF":
-        analysisPDF_page.show()
-    elif choice == "LLM Analysis V2":
-        analysis_v2_page.show()
-    elif choice == "LLM Analysis V2 - Raw PDF":
-        analysisPDF_v2_page.show()
-    elif choice == "Propublica API":
-        propublica_UI.show()
-    elif choice == "Propublica API [CLOUD]":
-        propublica_cloud_UI.show()
-    elif choice == "Spider":
-        spider_UI.show()
-
-    elif choice == "Settings":
+    elif choice == ANALYSIS_SECTION:
+        choice = questionary.select("Select version", choices = [LLM_ANALYSIS_URL_V2,LLM_ANALYSIS_PDF_V2]).ask()
+        if choice == LLM_ANALYSIS_URL_V2:
+            analysis_v2_page.show()
+        elif choice == LLM_ANALYSIS_PDF_V2:
+            analysisPDF_v2_page.show()
+    elif choice == PROPUBLICA_SECTION:
+        choice = questionary.select("Select tool", choices= [PROPUBLICA_ORG_FINDER,PROPUBLICA_DOMAIN_FINDER]).ask()
+        if choice == PROPUBLICA_ORG_FINDER:
+            propublica_UI.show()
+        elif choice == PROPUBLICA_DOMAIN_FINDER:
+            domain_finder_UI.show()
+    elif choice == SPIDER_SECTION:
+        choice = questionary.select("Select version", choices = [SPIDER_V1,SPIDER_V2]).ask()
+        if choice == SPIDER_V1:
+            spider_UI.show()
+        elif choice == SPIDER_V2:
+            pass
+    elif choice == SETTINGS:
         settings_page.show()
+
+
 
 if __name__ == "__main__":
     main()

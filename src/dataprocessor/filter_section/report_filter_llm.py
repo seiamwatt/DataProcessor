@@ -79,18 +79,39 @@ def extract_pdf_text(pdf_url, max_pages=15):
 
 
 def create_prompt(pdf_url, pdf_text=None):
-    """Create prompt for DeepSeek to identify annual reports and their year"""
+    """Create prompt for DeepSeek to identify annual/impact/presidential reports and their year"""
+
+    report_types = """Accept the document if it is any of the following:
+- ANNUAL REPORT: a comprehensive overview of an organization's activities over the past year, usually with financial statements, operations summary, achievements, and future outlook
+- IMPACT REPORT: a report on the organization's outcomes, results, or social impact over a period (also called outcomes report, results report, or year in review)
+- PRESIDENTIAL REPORT: a report from the president, chair, CEO, or executive director reviewing the organization's year (also called president's report, president's letter, or annual message)
+
+Reject the document if it is NOT one of the above, for example:
+- A Form 990 or other tax filing
+- Standalone/audited financial statements only
+- Newsletters, brochures, program flyers, press releases, meeting minutes, or grant applications"""
+
+    year_format = """For the "year" field:
+- Use a 4-digit integer (e.g. 2023) if you can determine the year
+- Use null if you cannot determine the year or if it is not one of the accepted report types
+
+For the "report_type" field:
+- Use one of "annual", "impact", "presidential"
+- Use null if it is not one of the accepted report types
+- If the document fits more than one type, pick the one that best matches the title"""
+
+    json_format = """Respond with ONLY a JSON object in this exact format: 1 for True and 0 for False
+{"is_annual_report": 1/0, "report_type": "annual/impact/presidential", "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}
+
+Set "is_annual_report" to 1 if the document is an annual, impact, OR presidential report, and 0 otherwise."""
 
     if pdf_text:
-        prompt = f"""Analyze the following document and determine if it is an ANNUAL REPORT.
+        prompt = f"""Analyze the following document and determine if it is an ANNUAL REPORT, an IMPACT REPORT, or a PRESIDENTIAL REPORT.
 
-An annual report typically:
-- Provides a comprehensive overview of an organization's activities over the past year
-- Includes financial statements, operations summary, achievements, and future outlook
-- Is NOT just a Form 990 (tax filing), financial statement only, or other specific financial documents
+{report_types}
 
-Also identify the YEAR the annual report covers. This is the fiscal or calendar year the report is about (e.g. "2023 Annual Report" covers year 2023). Look for clues such as:
-- The title (e.g. "Annual Report 2022")
+Also identify the YEAR the report covers. This is the fiscal or calendar year the report is about (e.g. "2023 Annual Report" covers year 2023). Look for clues such as:
+- The title (e.g. "Annual Report 2022", "2022 Impact Report")
 - The fiscal year period mentioned (e.g. "For the year ended December 31, 2023")
 - Date ranges in the financial statements
 - If the report covers a fiscal year like "July 2022 - June 2023", use the ending year (2023)
@@ -100,30 +121,21 @@ PDF URL: {pdf_url}
 Document text (first few pages):
 {pdf_text}
 
-Respond with ONLY a JSON object in this exact format: 1 for True and 0 for False
-{{"is_annual_report": 1/0, "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}}
+{json_format}
 
-For the "year" field:
-- Use a 4-digit integer (e.g. 2023) if you can determine the year
-- Use null if you cannot determine the year or if it is not an annual report"""
+{year_format}"""
     else:
-        prompt = f"""Based on the PDF URL, determine if this document is likely an ANNUAL REPORT.
+        prompt = f"""Based on the PDF URL, determine if this document is likely an ANNUAL REPORT, an IMPACT REPORT, or a PRESIDENTIAL REPORT.
 
-An annual report typically:
-- Provides a comprehensive overview of an organization's activities over the past year
-- Includes financial statements, operations summary, achievements, and future outlook
-- Is NOT just a Form 990 (tax filing), financial statement only, or other specific financial documents
+{report_types}
 
-Also identify the YEAR the annual report covers based on any clues in the URL (e.g. "2022-annual-report.pdf" suggests year 2022).
+Also identify the YEAR the report covers based on any clues in the URL (e.g. "2022-annual-report.pdf" suggests year 2022, "impact-report-2021.pdf" suggests year 2021).
 
 PDF URL: {pdf_url}
 
-Respond with ONLY a JSON object in this exact format: 1 for True and 0 for False
-{{"is_annual_report": 1/0, "confidence": "high/medium/low", "reason": "brief explanation", "year": 2023}}
+{json_format}
 
-For the "year" field:
-- Use a 4-digit integer (e.g. 2023) if you can determine the year of the report
-- Use null if you cannot determine the year or if it is not an annual report"""
+{year_format}"""
 
     return prompt
 
@@ -211,6 +223,7 @@ def batch_processing(df_batch, api_key,pdf_url_column, extract_text=True):
             result_row = row.copy()
             result_row["is_annual_report"] = classification.get("is_annual_report", False)
             # console.print(f"[bold red]Classification {result_row['is_annual_report']}[/bold red]")
+            result_row["report_type"] = classification.get("report_type", None)
             result_row["confidence"] = classification.get("confidence", "unknown")
             result_row["classification_reason"] = classification.get("reason", "")
 
@@ -223,6 +236,7 @@ def batch_processing(df_batch, api_key,pdf_url_column, extract_text=True):
             print(f"  Failed to classify")
             result_row = row.copy()
             result_row["is_annual_report"] = None
+            result_row["report_type"] = None
             result_row["confidence"] = "failed"
             result_row["classification_reason"] = "API call failed"
             results.append(result_row)

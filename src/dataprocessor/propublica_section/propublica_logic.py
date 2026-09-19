@@ -38,7 +38,7 @@ def page_overview():
     
 def populate_data(num_pages, ntee_catagory_id,start_state_index,end_state_index):
 
-    full_range_letters = {'R','X','C','D','B','P','A','N','W','T'}
+    full_range_letters = {'R','X','C','D','B','P','A','N','W','T','V'}
 
     url = "https://projects.propublica.org/nonprofits/api/v2"
 

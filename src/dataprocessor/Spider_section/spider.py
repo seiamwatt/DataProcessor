@@ -25,9 +25,16 @@ evidence it still resolves. Keeping the snapshot means a dead live link doesn't
 cost you the document. Collapse on your own terms downstream if you want one
 row per report.
 
-By default this runs in LINKS-ONLY mode: instead of downloading each PDF, it just
-records the PDF's URL in the manifest. Pass --download (CLI) or links_only=False
-(populate_data) to fetch and save the actual files.
+Not every report is a PDF. Before ~2010 plenty of nonprofits published the
+annual report as a plain web page (lssmn.org/2002_annual_report.htm), and those
+pages are exactly what the archive still holds from the far end of the lookback
+window, so both sources also collect HTML reports. They are recorded alongside
+the PDFs with a `format` column saying which is which; pass --no-html-reports
+(CLI) or html_reports=False (populate_data) for PDFs only.
+
+By default this runs in LINKS-ONLY mode: instead of downloading each document,
+it just records its URL in the manifest. Pass --download (CLI) or
+links_only=False (populate_data) to fetch and save the actual files.
 
 Input: a JSON file describing the orgs, e.g.
   [
@@ -247,6 +254,68 @@ SKIP_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico",
                    ".wmv", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
                    ".woff", ".woff2", ".ttf", ".eot")
 
+# Extensions that name a single web page rather than a section index. Old
+# nonprofit sites published the report itself as one of these -- e.g.
+# lssmn.org/2002_annual_report.htm IS the 2002 annual report, not a link to it.
+PAGE_EXTENSIONS = (".htm", ".html", ".shtml", ".asp", ".aspx", ".php",
+                   ".jsp", ".cfm")
+
+# A filename that means "this directory's landing page", not a document.
+_INDEX_STEMS = {"index", "default", "home", "main", "welcome"}
+
+# Pages are matched on "report" alone, not on REPORT_KEYWORDS. A nonprofit
+# site has one annual report and a dozen pages about its annual gala, annual
+# meeting, annual fund and annual appeal, so on the page side "annual" by
+# itself is mostly noise -- while a PDF named annual-*.pdf is usually the
+# report. What this costs is a page filed as /annual/2003.htm, which is rare.
+PAGE_REPORT_KEYWORD = "report"
+
+_FULL_YEAR = re.compile(r"(?:19|20)\d{2}")
+
+
+def is_page_report_url(url: str, org_name: Optional[str] = None) -> bool:
+    """True if the URL looks like a report published AS A WEB PAGE, not a PDF.
+
+    A crawl that only accepts .pdf silently loses the oldest end of the
+    lookback window, because that is the era whose reports were published as
+    HTML and are now only in the archive.
+
+    The tests here are tighter than is_report_url's, because "looks like a
+    report" is a far weaker signal for pages: every site has an
+    /annual-reports/ section index, and it matches exactly the keywords the
+    reports under it do. So a page has to both
+
+      (a) say "report" outright (see PAGE_REPORT_KEYWORD), or be named
+          org+year -- the loose `ar` token rule is dropped, since /ar/ is also
+          how sites path their Arabic locale, and
+      (b) look like a leaf: a real page file (.htm, .asp, ...) or a path
+          carrying a four-digit year.
+
+    A bare index filename needs the year too, so /reports/index.html stays out
+    while /reports/2003/index.html comes in.
+    """
+    path = unquote(urlparse(url).path)
+    low = path.lower()
+    if low.endswith(".pdf") or low.endswith(SKIP_EXTENSIONS):
+        return False
+    if not (PAGE_REPORT_KEYWORD in low
+            or (org_name and _org_year_filename(path, org_name))):
+        return False
+    stem = os.path.splitext(low.rstrip("/").rsplit("/", 1)[-1])[0]
+    if not stem or stem in _INDEX_STEMS:
+        return bool(_FULL_YEAR.search(low))
+    # An extensionless CMS route (/about/annual-report-2019) is only
+    # distinguishable from the section index above it by the year it carries.
+    return low.endswith(PAGE_EXTENSIONS) or bool(_FULL_YEAR.search(low))
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Read a boolean .env override; unset keeps the default."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off", ""}
+
 
 # ===========================================================================
 # Config -- one immutable object instead of mutable module globals
@@ -262,6 +331,9 @@ class Config:
     max_bytes: int = 50 * 1024 * 1024  # per-response download cap (50 MB)
     output_dir: str = "./reports"
     all_pdfs: bool = False
+    # Collect reports published as web pages too (see is_page_report_url),
+    # not just PDFs. False = PDFs only.
+    html_reports: bool = True
     do_ocr: bool = False
     links_only: bool = True
     sources: tuple[str, ...] = ("wayback", "live")
@@ -282,6 +354,7 @@ class Config:
             max_workers=int(os.getenv("MAX_WORKERS", cls.max_workers)),
             max_bytes=int(os.getenv("MAX_BYTES", cls.max_bytes)),
             output_dir=os.getenv("OUTPUT_DIR", cls.output_dir),
+            html_reports=_env_flag("HTML_REPORTS", cls.html_reports),
         )
 
     def window_years(self) -> tuple[int, int]:
@@ -332,6 +405,8 @@ class WorkItem:
     depth: int = 0
     expand: bool = False        # follow links found on this page?
     year: Optional[int] = None
+    collect: bool = False       # is this URL itself a report to record?
+    fmt: str = "pdf"            # "pdf" | "html" -- what we expect to find
 
 
 class URLSeen:
@@ -542,6 +617,15 @@ class ContentParser:
         from bs4 import BeautifulSoup
         return BeautifulSoup(html_bytes, "html.parser")
 
+    def page_text_len(self, html_bytes: bytes) -> int:
+        """Visible-text length of an HTML report -- the analogue of a PDF's
+        text_len, and what separates a real report from an empty frameset."""
+        try:
+            return len(self.parse_html(html_bytes, "").get_text(" ", strip=True))
+        except Exception as e:
+            log.warning("HTML parse error: %s", e)
+            return 0
+
     @staticmethod
     def _text_len(reader: PdfReader) -> int:
         return len("".join((p.extract_text() or "") for p in reader.pages).strip())
@@ -604,7 +688,7 @@ class ContentSeen:
 class ContentStorage:
     # Union of every field either row shape can produce, so the streamed CSV
     # has a stable header whether we're in links-only or download mode.
-    FIELDNAMES = ["org", "source", "year", "url", "saved_path", "bytes",
+    FIELDNAMES = ["org", "source", "format", "year", "url", "saved_path", "bytes",
                   "pages", "text_len", "scanned_or_ocr", "sha256", "collected_at"]
 
     def __init__(self, out_dir: str, manifest_name: str = "manifest.csv") -> None:
@@ -679,39 +763,63 @@ class ContentStorage:
         except Exception as e:
             log.warning("could not append to manifest %s: %s", self.manifest_csv, e)
 
-    def record_link(self, *, org: str, source: str, year, url: str) -> None:
-        """Links-only mode: record the PDF's URL in the manifest without
+    def record_link(self, *, org: str, source: str, year, url: str,
+                    fmt: str = "pdf") -> None:
+        """Links-only mode: record the document's URL in the manifest without
         downloading the file. The row is streamed to disk immediately."""
         self._append_row({
-            "org": org, "source": source, "year": year if year else "undated",
-            "url": url, "collected_at": dt.datetime.now().isoformat(timespec="seconds"),
+            "org": org, "source": source, "format": fmt,
+            "year": year if year else "undated", "url": url,
+            "collected_at": dt.datetime.now().isoformat(timespec="seconds"),
         })
 
     def save_pdf(self, data: bytes, *, org: str, source: str, year, url: str,
                  n_pages: int, text_len: int, ocr_used: bool) -> str:
+        return self._save_document(data, org=org, source=source, year=year,
+                                   url=url, fmt="pdf", ext=".pdf",
+                                   n_pages=n_pages, text_len=text_len,
+                                   ocr_used=ocr_used)
+
+    def save_page(self, data: bytes, *, org: str, source: str, year, url: str,
+                  text_len: int) -> str:
+        """Download mode, HTML report: the page IS the document, so it is saved
+        verbatim beside the PDFs rather than converted into one."""
+        return self._save_document(data, org=org, source=source, year=year,
+                                   url=url, fmt="html", ext=".html",
+                                   n_pages=1, text_len=text_len, ocr_used=False)
+
+    def _save_document(self, data: bytes, *, org: str, source: str, year,
+                       url: str, fmt: str, ext: str, n_pages: int,
+                       text_len: int, ocr_used: bool) -> str:
         year = year if year else "undated"
         folder = os.path.join(self.out_dir, slugify(org), source, str(year))
         os.makedirs(folder, exist_ok=True)
 
-        base = os.path.basename(urlparse(url).path) or "document.pdf"
-        if not base.lower().endswith(".pdf"):
-            base += ".pdf"
-        stem = slugify(os.path.splitext(base)[0])
-        path = os.path.join(folder, f"{year}_{stem}.pdf")
+        # Walk the path segments rather than taking basename(), so a
+        # directory-style page URL (/reports/2003/) is named after its last
+        # segment instead of falling through to "document".
+        segments = [s for s in urlparse(url).path.split("/") if s]
+        stem = slugify(os.path.splitext(segments[-1])[0]) if segments else ""
+        # Every site's report pages are called index.html; without the parent
+        # segment they'd all land on one filename and be suffixed _1, _2, _3.
+        if stem in _INDEX_STEMS and len(segments) > 1:
+            stem = f"{slugify(segments[-2])}-{stem}"
+        stem = stem or "document"
+        path = os.path.join(folder, f"{year}_{stem}{ext}")
 
         # Avoid clobbering same-name different-content files.
         i = 1
         while os.path.exists(path):
-            path = os.path.join(folder, f"{year}_{stem}_{i}.pdf")
+            path = os.path.join(folder, f"{year}_{stem}_{i}{ext}")
             i += 1
 
         with open(path, "wb") as f:
             f.write(data)
 
         self._append_row({
-            "org": org, "source": source, "year": year, "url": url,
-            "saved_path": path, "bytes": len(data), "pages": n_pages,
-            "text_len": text_len, "scanned_or_ocr": ocr_used,
+            "org": org, "source": source, "format": fmt, "year": year,
+            "url": url, "saved_path": path, "bytes": len(data),
+            "pages": n_pages, "text_len": text_len, "scanned_or_ocr": ocr_used,
             "sha256": ContentSeen.digest(data),
             "collected_at": dt.datetime.now().isoformat(timespec="seconds"),
         })
@@ -768,10 +876,12 @@ class URLExtractor:
 # ===========================================================================
 class URLFilter:
     def __init__(self, seed_domain: str, all_pdfs: bool = False,
-                 org_name: Optional[str] = None) -> None:
+                 org_name: Optional[str] = None,
+                 html_reports: bool = True) -> None:
         self.seed_domain = registered_domain(seed_domain)
         self.all_pdfs = all_pdfs
         self.org_name = org_name
+        self.html_reports = html_reports
 
     def same_site(self, url: str) -> bool:
         return registered_domain(urlparse(url).netloc) == self.seed_domain
@@ -787,6 +897,16 @@ class URLFilter:
         """A PDF is worth collecting if it's on-site and looks like a report."""
         return self.same_site(url) and self.looks_like_report(url)
 
+    def keep_page(self, url: str) -> bool:
+        """An HTML page worth recording as a report in its own right.
+
+        `all_pdfs` deliberately does NOT widen this: "keep every PDF" is a few
+        hundred files, but "keep every page" is the entire crawl, so pages
+        always have to earn their place through the report heuristic.
+        """
+        return (self.html_reports and self.same_site(url)
+                and is_page_report_url(url, self.org_name))
+
     def follow_html(self, url: str) -> bool:
         """Follow same-site links, but not PDFs or static assets -- assets
         can't lead to reports and would eat the per-site page budget."""
@@ -798,14 +918,23 @@ class URLFilter:
 # ===========================================================================
 # Seeder -- Wayback pushes archived URLs into the frontier
 # ===========================================================================
-def seed_wayback(org: dict, frontier: URLFrontier, downloader: Downloader,
-                 cfg: Config) -> None:
-    """Enqueue every archived PDF on the domain within the lookback window."""
+# The HTML pass pushes the keyword test server-side as a urlkey regex (urlkey
+# is CDX's lowercased, canonicalized URL, so no case handling is needed). This
+# is not an optimization: a domain's PDFs are few enough to filter here, but
+# its *pages* are the whole 20-year site, and that payload runs into the
+# downloader's size cap and loses the org's HTML seeds entirely. The cost is
+# that an HTML report named org+year with no "report" in its URL isn't seeded
+# from the archive -- the live crawl still finds it if the site still serves it.
+HTML_URLKEY_REGEX = ".*report.*"
+
+
+def _cdx_query(downloader: Downloader, domain: str, mimetype: str, cfg: Config,
+               url_regex: Optional[str] = None):
+    """One CDX page-listing for a domain, narrowed to a single mimetype."""
     oldest, this_year = cfg.window_years()
-    domain = org["domain"]
     params = [
         ("url", f"{domain}*"),
-        ("filter", "mimetype:application/pdf"),
+        ("filter", f"mimetype:{mimetype}"),
         ("filter", "statuscode:200"),
         ("from", f"{oldest}0101"),
         ("to", f"{this_year}1231"),
@@ -814,28 +943,59 @@ def seed_wayback(org: dict, frontier: URLFrontier, downloader: Downloader,
         # Only the two fields we use -- CDX payloads for big domains are huge.
         ("fl", "timestamp,original"),
     ]
-    rows = downloader.get_json(WAYBACK_CDX, params=params)
-    if rows is None:
-        console.print(f"[yellow]Wayback: bad response for {domain}[/yellow]")
+    if url_regex:
+        params.append(("filter", f"urlkey:{url_regex}"))
+    return downloader.get_json(WAYBACK_CDX, params=params)
+
+
+def seed_wayback(org: dict, frontier: URLFrontier, downloader: Downloader,
+                 cfg: Config) -> None:
+    """Enqueue every archived report on the domain within the lookback window.
+
+    Two passes over CDX -- PDFs, then (unless html_reports is off) pages, which
+    is where the early-2000s reports live: lssmn.org/2002_annual_report.htm is
+    an annual report that only ever existed as HTML.
+    """
+    domain = org["domain"]
+    passes = [("application/pdf", "pdf", None)]
+    if cfg.html_reports:
+        passes.append(("text/html", "html", HTML_URLKEY_REGEX))
+
+    queued = {"pdf": 0, "html": 0}
+    answered = False
+    for mimetype, fmt, url_regex in passes:
+        rows = _cdx_query(downloader, domain, mimetype, cfg, url_regex)
+        if rows is None:
+            console.print(f"[yellow]Wayback: bad {fmt} response for {domain}[/yellow]")
+            continue
+        answered = True
+        if not rows or len(rows) < 2:
+            continue
+        header, *records = rows
+        idx = {name: i for i, name in enumerate(header)}
+        for rec in records:
+            ts = rec[idx["timestamp"]]
+            original = rec[idx["original"]]
+            if fmt == "pdf":
+                keep = cfg.all_pdfs or is_report_url(original, org.get("name"))
+            else:
+                # all_pdfs never widens the page test -- see URLFilter.keep_page.
+                keep = is_page_report_url(original, org.get("name"))
+            if not keep:
+                continue
+            # `id_` returns the raw archived file with no Wayback wrapper.
+            archived = f"https://web.archive.org/web/{ts}id_/{original}"
+            if frontier.add(WorkItem(archived, source="wayback", org=org["name"],
+                                     year=int(ts[:4]), collect=True, fmt=fmt)):
+                queued[fmt] += 1
+
+    if not answered:
         return
-    if not rows or len(rows) < 2:
+    if not any(queued.values()):
         console.print(f"  Wayback: nothing archived for {domain}")
         return
-
-    header, *records = rows
-    idx = {name: i for i, name in enumerate(header)}
-    queued = 0
-    for rec in records:
-        ts = rec[idx["timestamp"]]
-        original = rec[idx["original"]]
-        if not cfg.all_pdfs and not is_report_url(original, org.get("name")):
-            continue
-        # `id_` returns the raw archived file with no Wayback wrapper.
-        archived = f"https://web.archive.org/web/{ts}id_/{original}"
-        if frontier.add(WorkItem(archived, source="wayback", org=org["name"],
-                                 year=int(ts[:4]))):
-            queued += 1
-    console.print(f"  Wayback: queued {queued} archived PDF(s)")
+    tail = f" + {queued['html']} page(s)" if cfg.html_reports else ""
+    console.print(f"  Wayback: queued {queued['pdf']} archived PDF(s){tail}")
 
 
 # ===========================================================================
@@ -873,7 +1033,8 @@ class Crawler:
         # looking like they disagree.
         if "live" in self.cfg.sources:
             self._filters[org["name"]] = URLFilter(org["domain"], self.cfg.all_pdfs,
-                                                  org.get("name"))
+                                                  org.get("name"),
+                                                  self.cfg.html_reports)
             self.frontier.add(WorkItem(f"https://{org['domain']}/", source="live",
                                        org=org["name"], depth=0, expand=True))
         if "wayback" in self.cfg.sources:
@@ -910,13 +1071,16 @@ class Crawler:
     def _process(self, item: WorkItem, pages_seen: dict[str, int]) -> None:
         url = item.url
 
-        # Links-only: known PDF URLs (wayback seeds, or .pdf links found on the
-        # live crawl) go straight to the manifest -- no fetch needed.
-        if self.cfg.links_only and (item.source == "wayback"
-                                    or URLFilter.is_pdf_url(url)):
+        # Links-only: a URL we already believe is a report (a wayback seed, a
+        # .pdf link, or an HTML report page found on the live crawl) goes
+        # straight to the manifest -- no fetch needed. A PDF is a leaf and
+        # we're done with it; an HTML report is ALSO an ordinary page, so if it
+        # was queued for expansion we keep crawling it after recording it.
+        if self.cfg.links_only and item.collect:
             self.storage.record_link(org=item.org, source=item.source,
-                                     year=item.year, url=url)
-            return
+                                     year=item.year, url=url, fmt=item.fmt)
+            if not item.expand:
+                return
 
         # live-crawl breadth cap + robots (only enforced for the live crawl).
         # Robots runs BEFORE the counter, so disallowed URLs don't eat the
@@ -947,12 +1111,20 @@ class Crawler:
 
         if is_pdf:
             if self.cfg.links_only:
-                # A live URL with no .pdf extension that turned out to be a PDF.
-                self.storage.record_link(org=item.org, source=item.source,
-                                         year=item.year, url=item.url)
+                # A live URL with no .pdf extension that turned out to be a
+                # PDF -- unless `collect` already put it in the manifest above.
+                if not item.collect:
+                    self.storage.record_link(org=item.org, source=item.source,
+                                             year=item.year, url=item.url,
+                                             fmt="pdf")
             else:
                 self._handle_pdf(item, body)
             return
+
+        # Download mode, HTML report: the page itself is the document. Saving
+        # it doesn't end the item -- it can still be expanded below.
+        if item.collect and not self.cfg.links_only:
+            self._handle_page(item, body)
 
         # HTML: only the live crawl expands further
         if item.expand and item.depth < self.cfg.max_depth and "html" in ctype:
@@ -967,22 +1139,34 @@ class Crawler:
                               year=item.year, url=item.url,
                               n_pages=n_pages, text_len=text_len, ocr_used=ocr_used)
 
+    def _handle_page(self, item: WorkItem, body: bytes) -> None:
+        if not self.content_seen.is_new(body):
+            return   # identical page already saved (e.g. live + wayback dupe)
+        self.storage.save_page(body, org=item.org, source=item.source,
+                               year=item.year, url=item.url,
+                               text_len=self.parser.page_text_len(body))
+
     def _expand_html(self, item: WorkItem, resp: requests.Response) -> None:
         soup = self.parser.parse_html(resp.content, resp.url)
         # One filter per org (built at seed time); fall back to the current
         # host if a redirect landed us somewhere we didn't seed.
         flt = self._filters.get(item.org) or URLFilter(urlparse(resp.url).netloc,
-                                                       self.cfg.all_pdfs, item.org)
+                                                       self.cfg.all_pdfs, item.org,
+                                                       self.cfg.html_reports)
         for link in self.extractor.extract(soup, resp.url):
             if flt.is_pdf_url(link):
                 if flt.keep_pdf(link):
                     # Year is unknown for live finds -- leave undated instead of
                     # stamping today's year on a possibly-old report.
                     self.frontier.add(WorkItem(link, source="live", org=item.org,
-                                               depth=item.depth + 1))
+                                               depth=item.depth + 1, collect=True))
             elif flt.follow_html(link):
+                # A report published as a page is both a document to record and
+                # an ordinary page to keep crawling -- one item does both, so
+                # recording it never costs us the links it holds.
                 self.frontier.add(WorkItem(link, source="live", org=item.org,
-                                           depth=item.depth + 1, expand=True))
+                                           depth=item.depth + 1, expand=True,
+                                           collect=flt.keep_page(link), fmt="html"))
 
 
 # ===========================================================================
@@ -1101,7 +1285,7 @@ def populate_data(orgs_df: Optional[pd.DataFrame], out_dir: str, sources,
                   years: int = 20, depth: int = 3,
                   start_row: int = 0, end_row: Optional[int] = None, *,
                   all_pdfs: bool = False, do_ocr: bool = False,
-                  links_only: bool = True,
+                  links_only: bool = True, html_reports: bool = True,
                   max_workers: Optional[int] = None,
                   progress: Optional["CrawlProgress"] = None) -> Optional[pd.DataFrame]:
     """Run the crawler over a slice of an orgs DataFrame; return the manifest df.
@@ -1124,7 +1308,8 @@ def populate_data(orgs_df: Optional[pd.DataFrame], out_dir: str, sources,
 
     cfg = replace(Config.from_env(), years_back=years, max_depth=depth,
                   output_dir=out_dir, sources=tuple(sources),
-                  all_pdfs=all_pdfs, do_ocr=do_ocr, links_only=links_only)
+                  all_pdfs=all_pdfs, do_ocr=do_ocr, links_only=links_only,
+                  html_reports=html_reports)
     workers = max(1, int(max_workers if max_workers is not None else cfg.max_workers))
 
     orgs, skipped = [], []
@@ -1263,6 +1448,9 @@ def main() -> None:
                     help="Orgs to crawl in parallel per source (default: 4)")
     ap.add_argument("--all-pdfs", action="store_true",
                     help="Keep every PDF, not just ones whose URL looks like a report")
+    ap.add_argument("--no-html-reports", action="store_true",
+                    help="PDFs only -- skip reports published as web pages "
+                         "(e.g. lssmn.org/2002_annual_report.htm)")
     ap.add_argument("--download", action="store_true",
                     help="Download and save the PDFs instead of only collecting links")
     ap.add_argument("--ocr", action="store_true",
@@ -1295,6 +1483,7 @@ def main() -> None:
     cfg = replace(env_cfg, years_back=args.years, max_depth=args.depth,
                   output_dir=args.out, sources=sources, all_pdfs=args.all_pdfs,
                   do_ocr=args.ocr, links_only=not args.download,
+                  html_reports=not args.no_html_reports,
                   max_workers=max(1, args.workers))
 
     oldest, this_year = cfg.window_years()
@@ -1313,7 +1502,8 @@ def main() -> None:
     df = run_lanes(cfg, with_domain, cfg.max_workers)
     if df is not None:
         console.print(f"\n[green]Done. {len(df)} documents.[/green]")
-        cols = [c for c in ("org", "source", "year", "pages", "saved_path", "url")
+        cols = [c for c in ("org", "source", "format", "year", "pages",
+                            "saved_path", "url")
                 if c in df.columns]
         console.print(df[cols].to_string(index=False))
 

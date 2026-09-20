@@ -52,8 +52,8 @@ Q_STYLE = Style(
 )
 
 SOURCES = {
-    "wayback": ("Archived report PDFs", "Internet Archive \u2014 backfills what live misses"),
-    "live": ("Current report PDFs", "BFS crawl of the live site (runs first)"),
+    "wayback": ("Archived reports (PDF + page)", "Internet Archive \u2014 backfills what live misses"),
+    "live": ("Current reports (PDF + page)", "BFS crawl of the live site (runs first)"),
 }
 
 # What every interactive crawl runs. These two are complementary, not
@@ -159,7 +159,7 @@ def inputs_table() -> Table:
     t.add_column("Input", style=f"bold {INK}", no_wrap=True)
     t.add_column("Notes", style=MUTED)
     t.add_row("Org CSV", "Columns: name, domain, ein")
-    t.add_row("Output folder", "Destination for PDFs and one manifest per source")
+    t.add_row("Output folder", "Destination for documents and one manifest per source")
     t.add_row("Years / depth", "Defaults: 20 years, depth 3")
     t.add_row("Row range", "Subset of CSV rows to process")
     return t
@@ -313,7 +313,7 @@ def ask_config() -> dict | None:
     console.print(f"  [{MUTED}]Loaded [bold]{len(orgs_df)}[/] organizations.[/]\n")
 
     # Output folder
-    out_raw = questionary.path("Output folder for PDFs and manifest:", default="./reports", style=Q_STYLE).ask()
+    out_raw = questionary.path("Output folder for documents and manifest:", default="./reports", style=Q_STYLE).ask()
     if out_raw is None:
         return None
     out_dir = clean_path(out_raw) or "./reports"

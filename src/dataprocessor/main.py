@@ -23,6 +23,7 @@ from dataprocessor.propublica_section import propublica_UI
 from dataprocessor.propublica_cloud_section import propublica_cloud_UI
 from dataprocessor.propublica_domain_finder_section import domain_finder_UI
 from dataprocessor.Spider_section import spider_UI
+from dataprocessor.wayback_section import wayback_UI
 # SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
@@ -33,6 +34,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 ANALYSIS_SECTION = "Analysis Section"
 PROPUBLICA_SECTION = "Propublica Section"
 SPIDER_SECTION = "Spider Section"
+WAYBACK_SECTION = "Wayback Section"
 
 
 FILTER_PAGE = "Filter data"
@@ -53,7 +55,7 @@ def main():
 
     main_page.show()
 
-    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,SETTINGS]).ask()
+    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,WAYBACK_SECTION,SETTINGS]).ask()
 
     if choice == FILTER_PAGE:
         filter_page.show()
@@ -75,6 +77,8 @@ def main():
             spider_UI.show()
         elif choice == SPIDER_V2:
             pass
+    elif choice == WAYBACK_SECTION:
+        wayback_UI.show()
     elif choice == SETTINGS:
         settings_page.show()
 

@@ -1,16 +1,14 @@
-"""Spider — Nonprofit Report Crawler
+"""Wayback — Internet Archive report collector
 Terminal UI (rich + questionary)
 
-Interactive:      python spider_ui.py
-Non-interactive:  python spider_ui.py --csv orgs.csv --out ./reports
-
-Crawls live sites only. Reports a site no longer serves come from the archive
-sweep in wayback_section/wayback_UI.py, which writes its own manifest.
+Interactive:      python wayback_UI.py
+Non-interactive:  python wayback_UI.py --csv orgs.csv --out ./reports --rpm 50
 """
 
 import argparse
 import os
 import sys
+import threading
 import time
 from datetime import timedelta
 
@@ -21,22 +19,20 @@ from rich.align import Align
 from rich.columns import Columns
 from rich.console import Console, Group
 from rich.live import Live
-from rich.padding import Padding
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
-from dotenv import load_dotenv
-from dataprocessor.config import load_env
 
-from dataprocessor.Spider_section import spider
+from dataprocessor.config import load_env
+from dataprocessor.wayback_section import wayback
 
 console = Console()
 
 # ---------------------------------------------------------------- theme ---
 
-ACCENT = "dark_orange"          # spider orange — the one loud color
-ACCENT_DIM = "dark_orange3"
+ACCENT = "deep_sky_blue2"       # archive blue — deliberately not spider orange
+ACCENT_DIM = "deep_sky_blue4"
 INK = "grey85"
 MUTED = "grey50"
 DANGER = "red3"
@@ -44,25 +40,23 @@ WARN = "gold3"
 
 Q_STYLE = Style(
     [
-        ("qmark", "fg:#ff8700 bold"),
+        ("qmark", "fg:#00afff bold"),
         ("question", "bold"),
-        ("answer", "fg:#ff8700 bold"),
-        ("pointer", "fg:#ff8700 bold"),
-        ("highlighted", "fg:#ff8700"),
-        ("selected", "fg:#ff8700"),
+        ("answer", "fg:#00afff bold"),
+        ("pointer", "fg:#00afff bold"),
+        ("highlighted", "fg:#00afff"),
+        ("selected", "fg:#00afff"),
         ("instruction", "fg:#666666"),
     ]
 )
 
-SOURCES = {
-    "live": ("Current reports (PDF + page)", "BFS crawl of the live site"),
+# The rate the archive is swept at. 50/min is the default everywhere; the
+# wizard offers the two directions someone actually wants to move it in.
+RPM_CHOICES = {
+    "50 — default": 50,
+    "30 — gentler, for long overnight runs": 30,
+    "20 — minimum footprint": 20,
 }
-
-# The spider crawls live sites and nothing else. The source is still named,
-# because it labels the manifest (manifest_live.csv) and the manifest's
-# `source` column -- which is what lets these rows be told apart from the
-# archive sweep's when the two are read together.
-DEFAULT_SOURCES = tuple(SOURCES)
 
 # ------------------------------------------------------------- utilities ---
 
@@ -128,40 +122,43 @@ class IntValidator(Validator):
 def banner() -> Panel:
     art = Text(
         "\n"
-        " ██████ █████  ██████ █████  ██████ █████ \n"
-        " ███    ██  ██   ██   ██  ██ ██     ██  ██\n"
-        "    ███ █████    ██   ██  ██ ████   █████ \n"
-        " ██████ ██     ██████ █████  ██████ ██  ██\n",
+        " ██    ██ ██████ ██  ██ █████  ██████ ██████ ██  ██\n"
+        " ██ ██ ██ ██  ██ ██████ ██  ██ ██  ██ ██     ████  \n"
+        " ██ ██ ██ ██████   ██   █████  ██████ ██     ██ ██ \n"
+        "  ██  ██  ██  ██   ██   █████  ██  ██ ██████ ██  ██\n",
         style=f"bold {ACCENT}",
     )
-    sub = Text("Nonprofit report crawler", style=MUTED, justify="center")
+    sub = Text("Internet Archive report collector", style=MUTED, justify="center")
     return Panel(
         Group(Align.center(art), Align.center(sub)),
         box=box.HEAVY,
         border_style=ACCENT_DIM,
-        subtitle=f"[{MUTED}]Spider[/]",
+        subtitle=f"[{MUTED}]Wayback[/]",
         padding=(0, 2),
     )
 
 
-def sources_table() -> Table:
+def passes_table() -> Table:
     t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM,
-              title="Sources", title_style=f"bold {INK}", expand=True)
-    t.add_column("ID", style=f"bold {ACCENT}", no_wrap=True)
+              title="What it sweeps (per org)", title_style=f"bold {INK}",
+              expand=True)
+    t.add_column("Pass", style=f"bold {ACCENT}", no_wrap=True)
     t.add_column("Retrieves", style=INK)
-    t.add_column("Source", style=MUTED)
-    for sid, (what, where) in SOURCES.items():
-        t.add_row(sid, what, where)
+    t.add_row("documents", "Archived PDFs whose URL reads like a report")
+    t.add_row("xml", "Word 2003 “Save As XML” reports, minus the sitemaps")
+    t.add_row("pages", "Reports published as HTML — the pre-2010 norm")
     return t
 
 
 def inputs_table() -> Table:
-    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, title="Required inputs", title_style=f"bold {INK}", expand=True)
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM,
+              title="Required inputs", title_style=f"bold {INK}", expand=True)
     t.add_column("Input", style=f"bold {INK}", no_wrap=True)
     t.add_column("Notes", style=MUTED)
     t.add_row("Org CSV", "Columns: name, domain, ein")
-    t.add_row("Output folder", "Destination for documents and manifest_live.csv")
-    t.add_row("Crawl depth", "How many links deep to follow (default 3)")
+    t.add_row("Output folder", "Destination for manifest_wayback.csv")
+    t.add_row("Lookback", "How far back to search (default: all of it, 1996-now)")
+    t.add_row("Request rate", "Shared budget for web.archive.org (default 50/min)")
     t.add_row("Row range", "Subset of CSV rows to process")
     return t
 
@@ -170,11 +167,17 @@ def intro():
     console.print(banner())
     console.print(
         Panel(
-            Columns([sources_table(), inputs_table()], equal=True, expand=True),
+            Columns([passes_table(), inputs_table()], equal=True, expand=True),
             box=box.ROUNDED,
             border_style=ACCENT_DIM,
             padding=(1, 2),
         )
+    )
+    console.print(
+        f"[{MUTED}]Every request goes to one host, so the rate below is the "
+        f"whole run's budget. The worker count is derived from it — enough "
+        f"requests in flight to actually spend the budget, never enough to "
+        f"exceed it.[/]\n"
     )
 
 
@@ -183,18 +186,19 @@ def config_panel(cfg: dict, n_orgs: int) -> Panel:
     t.add_column(style=MUTED, justify="right", no_wrap=True)
     t.add_column(style=INK)
 
-    src_badges = Text()
-    for i, s in enumerate(cfg["sources"]):
-        if i:
-            src_badges.append("  ")
-        src_badges.append(f" {s} ", style=f"black on {ACCENT}")
-
     n_selected = cfg["end_row"] - cfg["start_row"]
     t.add_row("Org CSV", cfg["org_csv_path"])
-    t.add_row("Organizations", f"{n_selected} of {n_orgs}  (rows {cfg['start_row']}\u2013{cfg['end_row']})")
+    t.add_row("Organizations",
+              f"{n_selected} of {n_orgs}  (rows {cfg['start_row']}–{cfg['end_row']})")
     t.add_row("Output", os.path.abspath(cfg["out_dir"]))
-    t.add_row("Sources", src_badges)
-    t.add_row("Crawl depth", str(cfg["depth"]))
+    t.add_row("Lookback", "1996-now (whole archive)" if not cfg["years"]
+                          else f"{cfg['years']} years")
+
+    rate = Text()
+    rate.append(f" {cfg['rpm']}/min ", style=f"black on {ACCENT}")
+    rate.append(f"  across {cfg['workers']} worker(s)", style=MUTED)
+    t.add_row("Request rate", rate)
+    t.add_row("Mode", "download files" if not cfg["links_only"] else "record links only")
 
     return Panel(
         t,
@@ -205,17 +209,13 @@ def config_panel(cfg: dict, n_orgs: int) -> Panel:
     )
 
 
-# Up to `workers x lanes` rows are open at once, so a high --workers could
-# push the panel off screen. Show the lowest-numbered few and count the rest.
+# Up to `workers` orgs are open at once, so a high --workers could push the
+# panel off screen. Show the lowest-numbered few and count the rest.
 MAX_ACTIVE_SHOWN = 6
 
 
 def _active_rows(active: list[dict]) -> Text:
-    """Render the rows in flight, one line each.
-
-    Orgs are crawled in parallel across both lanes, so several rows are always
-    open at once -- listing them beats picking one and calling it "current".
-    """
+    """Render the rows in flight, one line each."""
     shown, hidden = active[:MAX_ACTIVE_SHOWN], len(active) - MAX_ACTIVE_SHOWN
     out = Text()
     for i, a in enumerate(shown):
@@ -224,13 +224,31 @@ def _active_rows(active: list[dict]) -> Text:
         row = "?" if a["row"] is None else str(a["row"])
         out.append(f"row {row}", style=f"bold {ACCENT}")
         out.append(f"  {a['name']}", style=INK)
-        out.append(f"  [{a['lane']}]", style=MUTED)
     if hidden > 0:
         out.append(f"\n+{hidden} more", style=MUTED)
     return out
 
 
-def running_panel(cfg: dict, started: float, progress=None) -> Panel:
+def _rate_line(limiter) -> Text:
+    """Requests used, measured rate, and whether the archive pushed back.
+
+    Worth showing live: this is the one number that decides whether a long run
+    finishes or gets the IP blocked, and `in_window` is the real measured rate
+    rather than the configured ceiling.
+    """
+    s = limiter.stats()
+    out = Text()
+    out.append(f"{s['in_window']}", style=f"bold {ACCENT}")
+    out.append(f"/{s['rpm_limit']} per min", style=INK)
+    out.append(f"   {s['total']} total", style=MUTED)
+    if s["paused_for"] > 0:
+        out.append(f"   paused {s['paused_for']:.0f}s", style=f"bold {WARN}")
+    elif s["throttled"]:
+        out.append(f"   {s['throttled']} throttled", style=WARN)
+    return out
+
+
+def running_panel(cfg: dict, started: float, progress=None, limiter=None) -> Panel:
     n = cfg["end_row"] - cfg["start_row"]
     snap = progress.snapshot() if progress is not None else None
     body = Table(box=None, show_header=False, pad_edge=False)
@@ -241,49 +259,58 @@ def running_panel(cfg: dict, started: float, progress=None) -> Panel:
         body.add_row("Status", _active_rows(snap["active"]))
     else:
         # Before the first org is picked up, and in the gap after the last one
-        # finishes while the manifests are written.
+        # finishes while the manifest is written.
         waiting = "Starting up" if not snap or not snap["total"] else "Wrapping up"
         body.add_row("Status", Text(waiting, style=f"bold {ACCENT}"))
 
-    done = f"{snap['done']}/{snap['total']} done  \u00b7  " if snap and snap["total"] else ""
+    done = f"{snap['done']}/{snap['total']} done  ·  " if snap and snap["total"] else ""
     body.add_row("Organizations",
-                 f"{done}{n} in range (rows {cfg['start_row']}\u2013{cfg['end_row']})")
-    body.add_row("Sources", " \u00b7 ".join(cfg["sources"]))
+                 f"{done}{n} in range (rows {cfg['start_row']}–{cfg['end_row']})")
+    if limiter is not None:
+        body.add_row("Archive rate", _rate_line(limiter))
     body.add_row("Elapsed", fmt_duration(time.monotonic() - started))
-    return Panel(body, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]Spider running[/]", padding=(1, 2))
+    return Panel(body, border_style=ACCENT, box=box.ROUNDED,
+                 title=f"[bold {ACCENT}]Wayback running[/]", padding=(1, 2))
 
 
-def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
+def results_panel(manifest, cfg: dict, elapsed: float, limiter=None) -> Panel:
     if manifest is None or len(manifest) == 0:
         body = Group(
-            Text("No documents were found", style=f"bold {WARN}"),
-            Text("Consider widening the year lookback or adding sources.", style=MUTED),
+            Text("No archived documents were found", style=f"bold {WARN}"),
+            Text("Consider widening the year lookback, or enabling all formats.",
+                 style=MUTED),
         )
-        return Panel(body, border_style=WARN, box=box.ROUNDED, title=f"[bold {WARN}]Finished \u2014 no results[/]", padding=(1, 2))
+        return Panel(body, border_style=WARN, box=box.ROUNDED,
+                     title=f"[bold {WARN}]Finished — no results[/]", padding=(1, 2))
 
     lines = Table(box=None, show_header=False, pad_edge=False)
     lines.add_column(style=MUTED, justify="right", no_wrap=True)
     lines.add_column(style=INK)
     lines.add_row("Documents", Text(str(len(manifest)), style=f"bold {ACCENT}"))
     lines.add_row("Elapsed", fmt_duration(elapsed))
-    for src in cfg["sources"]:
-        path = os.path.join(os.path.abspath(cfg["out_dir"]), spider.manifest_name(src))
-        lines.add_row(f"Manifest ({src})", path if os.path.exists(path) else "\u2014 nothing collected")
+    if limiter is not None:
+        s = limiter.stats()
+        lines.add_row("Archive requests",
+                      f"{s['total']} at {s['rpm_limit']}/min"
+                      + (f"  ·  {s['throttled']} throttled" if s["throttled"] else ""))
+    path = os.path.join(os.path.abspath(cfg["out_dir"]), wayback.MANIFEST_NAME)
+    lines.add_row("Manifest", path if os.path.exists(path) else "— nothing collected")
 
-    # Per-source breakdown if the manifest exposes it
+    # Per-format breakdown if the manifest exposes it
     try:
-        counts = manifest["source"].value_counts()
+        counts = manifest["format"].value_counts()
         breakdown = Text()
-        for i, (src, cnt) in enumerate(counts.items()):
+        for i, (fmt, cnt) in enumerate(counts.items()):
             if i:
                 breakdown.append("   ")
-            breakdown.append(f"{src} ", style=f"bold {ACCENT}")
+            breakdown.append(f"{fmt} ", style=f"bold {ACCENT}")
             breakdown.append(str(cnt), style=INK)
-        lines.add_row("By source", breakdown)
+        lines.add_row("By format", breakdown)
     except Exception:
         pass
 
-    return Panel(lines, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]Finished[/]", padding=(1, 2))
+    return Panel(lines, border_style=ACCENT, box=box.ROUNDED,
+                 title=f"[bold {ACCENT}]Finished[/]", padding=(1, 2))
 
 
 # ---------------------------------------------------------------- wizard ---
@@ -292,7 +319,6 @@ def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
 def ask_config() -> dict | None:
     """Interactive wizard. Returns config dict, or None if cancelled."""
 
-    # Org CSV — validated inline, no retry loop needed
     raw = questionary.path(
         "Org list CSV (or drag a file in):",
         validate=CsvFileValidator(),
@@ -303,7 +329,7 @@ def ask_config() -> dict | None:
     org_csv_path = clean_path(raw)
 
     try:
-        orgs_df = spider.load_csv(org_csv_path)
+        orgs_df = wayback.load_csv(org_csv_path)
     except Exception as e:
         console.print(f"[bold {DANGER}]Unable to read the CSV file:[/] {e!r}")
         return None
@@ -312,8 +338,8 @@ def ask_config() -> dict | None:
         return None
     console.print(f"  [{MUTED}]Loaded [bold]{len(orgs_df)}[/] organizations.[/]\n")
 
-    # Output folder
-    out_raw = questionary.path("Output folder for documents and manifest:", default="./reports", style=Q_STYLE).ask()
+    out_raw = questionary.path("Output folder for the manifest:",
+                               default="./reports", style=Q_STYLE).ask()
     if out_raw is None:
         return None
     out_dir = clean_path(out_raw) or "./reports"
@@ -321,12 +347,25 @@ def ask_config() -> dict | None:
         console.print(f"[bold {DANGER}]{out_dir} exists and is not a folder.[/]")
         return None
 
-    # Numbers — each validated inline, bounds-checked against the CSV
-    depth = questionary.text("Live-crawl depth:", default="3", validate=IntValidator(lo=0, hi=10), style=Q_STYLE).ask()
-    if depth is None:
+    years = questionary.text("Years of lookback (0 = whole archive, 1996-now):",
+                             default="0",
+                             validate=IntValidator(lo=0, hi=100),
+                             style=Q_STYLE).ask()
+    if years is None:
         return None
+
+    rpm_label = questionary.select(
+        "Requests per minute to web.archive.org:",
+        choices=list(RPM_CHOICES),
+        default=next(iter(RPM_CHOICES)),
+        style=Q_STYLE,
+    ).ask()
+    if rpm_label is None:
+        return None
+
     start_row = questionary.text(
-        "Start row:", default="0", validate=IntValidator(lo=0, hi=len(orgs_df) - 1), style=Q_STYLE
+        "Start row:", default="0",
+        validate=IntValidator(lo=0, hi=len(orgs_df) - 1), style=Q_STYLE
     ).ask()
     if start_row is None:
         return None
@@ -339,69 +378,90 @@ def ask_config() -> dict | None:
     if end_row is None:
         return None
 
+    download = questionary.confirm(
+        "Download the files, rather than only recording their URLs?",
+        default=False, style=Q_STYLE,
+    ).ask()
+    if download is None:
+        return None
+
     return {
         "org_csv_path": org_csv_path,
         "orgs_df": orgs_df,
         "out_dir": out_dir,
-        "sources": DEFAULT_SOURCES,
-        "depth": int(depth),
+        "years": int(years),
+        "rpm": RPM_CHOICES[rpm_label],
+        # Sized from the chosen rate, not picked by hand: too few workers is
+        # what leaves a run sitting below its own budget.
+        "workers": wayback.WaybackConfig(
+            requests_per_minute=RPM_CHOICES[rpm_label]).effective_workers,
         "start_row": int(start_row),
         "end_row": int(end_row),
+        "links_only": not download,
     }
 
 
 # ------------------------------------------------------------------- run ---
 
 
-def run_crawl(cfg: dict):
+def run_sweep(cfg: dict):
     os.makedirs(cfg["out_dir"], exist_ok=True)
     started = time.monotonic()
 
-    # Live status card with an elapsed clock while the spider works.
-    # (populate_data blocks, so we refresh the clock from the render callable.)
-    progress = spider.CrawlProgress()
+    # Built here rather than inside populate_data so the status panel can read
+    # the live request rate off it while the sweep blocks.
+    limiter = wayback.RateLimiter(cfg["rpm"])
+    progress = wayback.CrawlProgress()
 
-    with Live(running_panel(cfg, started, progress), console=console,
+    with Live(running_panel(cfg, started, progress, limiter), console=console,
               refresh_per_second=2) as live:
-        import threading
-
         stop = threading.Event()
 
         def tick():
             while not stop.is_set():
-                live.update(running_panel(cfg, started, progress))
+                live.update(running_panel(cfg, started, progress, limiter))
                 stop.wait(0.5)
 
         t = threading.Thread(target=tick, daemon=True)
         t.start()
         try:
-            manifest = spider.populate_data(
+            manifest = wayback.populate_data(
                 orgs_df=cfg["orgs_df"],
                 out_dir=cfg["out_dir"],
-                sources=cfg["sources"],
-                depth=cfg["depth"],
+                years=cfg["years"],
                 start_row=cfg["start_row"],
                 end_row=cfg["end_row"],
+                links_only=cfg["links_only"],
+                requests_per_minute=cfg["rpm"],
+                max_workers=cfg["workers"],
                 progress=progress,
+                limiter=limiter,
             )
         finally:
             stop.set()
             t.join(timeout=1)
 
     elapsed = time.monotonic() - started
-    console.print(results_panel(manifest, cfg, elapsed))
+    console.print(results_panel(manifest, cfg, elapsed, limiter))
 
 
 # ------------------------------------------------------------------ main ---
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Spider — nonprofit report crawler")
+    p = argparse.ArgumentParser(description="Wayback — Internet Archive report collector")
     p.add_argument("--csv", help="org list CSV (name,domain,ein)")
     p.add_argument("--out", default="./reports", help="output folder")
-    p.add_argument("--depth", type=int, default=3)
+    p.add_argument("--years", type=int, default=0,
+                   help="0 = whole archive (1996-now)")
+    p.add_argument("--rpm", type=int, default=wayback.WaybackConfig.requests_per_minute,
+                   help="requests per minute to web.archive.org (whole-run budget)")
+    p.add_argument("--workers", type=int, default=0,
+                   help="0 sizes the pool from the rate budget")
     p.add_argument("--start-row", type=int, default=0)
     p.add_argument("--end-row", type=int, default=None)
+    p.add_argument("--download", action="store_true",
+                   help="save the files, not just their URLs")
     return p.parse_args()
 
 
@@ -409,25 +469,29 @@ def show():
     load_env()
     args = parse_args()
 
-    # ---- non-interactive mode: a CSV is enough ----------------------------
+    # ---- non-interactive mode: a CSV is enough -----------------------------
     if args.csv:
         csv_path = clean_path(args.csv)
         if not os.path.isfile(csv_path):
             console.print(f"[bold {DANGER}]Not a file:[/] {csv_path}")
             sys.exit(1)
-        orgs_df = spider.load_csv(csv_path)
+        orgs_df = wayback.load_csv(csv_path)
         cfg = {
             "org_csv_path": csv_path,
             "orgs_df": orgs_df,
             "out_dir": clean_path(args.out) or "./reports",
-            "sources": DEFAULT_SOURCES,
-            "depth": args.depth,
+            "years": args.years,
+            "rpm": max(1, args.rpm),
+            "workers": (args.workers if args.workers > 0 else
+                        wayback.WaybackConfig(
+                            requests_per_minute=max(1, args.rpm)).effective_workers),
             "start_row": max(0, args.start_row),
             "end_row": min(len(orgs_df), args.end_row) if args.end_row else len(orgs_df),
+            "links_only": not args.download,
         }
         console.print(banner())
         console.print(config_panel(cfg, len(orgs_df)))
-        run_crawl(cfg)
+        run_sweep(cfg)
         return
 
     # ---- interactive mode --------------------------------------------------
@@ -443,16 +507,19 @@ def show():
         # Review before committing
         console.print()
         console.print(config_panel(cfg, len(cfg["orgs_df"])))
-        go = questionary.confirm("Start crawling with this configuration?", default=True, style=Q_STYLE).ask()
+        go = questionary.confirm("Start the sweep with this configuration?",
+                                 default=True, style=Q_STYLE).ask()
         if not go:
-            retry = questionary.confirm("Re-enter the settings?", default=True, style=Q_STYLE).ask()
+            retry = questionary.confirm("Re-enter the settings?", default=True,
+                                        style=Q_STYLE).ask()
             if retry:
                 continue
             break
 
-        run_crawl(cfg)
+        run_sweep(cfg)
 
-        again = questionary.confirm("Run another session?", default=False, style=Q_STYLE).ask()
+        again = questionary.confirm("Run another session?", default=False,
+                                    style=Q_STYLE).ask()
         if not again:
             break
 
@@ -463,5 +530,5 @@ if __name__ == "__main__":
     try:
         show()
     except KeyboardInterrupt:
-        console.print(f"\n[{MUTED}]Interrupted. No further data was written.[/]")
+        console.print(f"\n[{MUTED}]Interrupted. Partial manifest written.[/]")
         sys.exit(130)

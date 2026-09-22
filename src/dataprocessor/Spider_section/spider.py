@@ -497,7 +497,7 @@ class Config:
     sources: tuple[str, ...] = ("live",)
     # Orgs crawled in parallel. Orgs are different hosts, so this multiplies
     # throughput without raising the per-host rate.
-    max_workers: int = 4
+    max_workers: int = 40
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -1618,7 +1618,7 @@ def main() -> None:
     ap.add_argument("--depth", type=int, default=env_cfg.max_depth,
                     help="Live-crawl link depth")
     ap.add_argument("--workers", type=int, default=env_cfg.max_workers,
-                    help="Orgs to crawl in parallel per source (default: 4)")
+                    help="Orgs to crawl in parallel per source (default: 40)")
     ap.add_argument("--all-pdfs", action="store_true",
                     help="Keep every document, not just ones whose URL looks "
                          "like a report")

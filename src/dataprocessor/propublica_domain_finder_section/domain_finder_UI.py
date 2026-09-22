@@ -32,20 +32,12 @@ console = Console()
 os.environ["TERM"] = "xterm-256color"
 
 # THEME ---------------------------------------------------------------------------
-# Presentation-layer constants only. Edit these to retheme the whole application.
-ACCENT = "dodger_blue1"
-EMPHASIS = "bold white"
-MUTED = "grey62"
-OK = "green"
-WARN = "yellow"
-ERR = "bold red"
-
-PROMPT_STYLE = questionary.Style([
-    ("qmark", "fg:#0087ff bold"),
-    ("question", "bold"),
-    ("answer", "fg:#0087ff"),
-    ("pointer", "fg:#0087ff bold"),
-])
+# One shared htop palette for every screen. Edit dataprocessor/theme.py to
+# retheme the whole application; nothing here defines its own colors.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_BAR, OK_BAR, PURPLE_BAR, ERR_BAR, EMPHASIS, MUTED, OK, WARN, ERR,
+    CYAN, GREEN, RED, BLUE, PURPLE, PROMPT_STYLE, chip, section,
+)
 # ---------------------------------------------------------------------------------
 
 
@@ -57,7 +49,7 @@ def resource_path(relative_path):
 load_env()
 def domain_finder_panel() -> Panel:
     """Application masthead."""
-    title = Text("PROPUBLICA DOMAIN FINDER", style=f"bold {ACCENT}")
+    title = Text(" PROPUBLICA DOMAIN FINDER ", style=f"bold {ACCENT_BAR}")
     subtitle = Text("Reads the website line off each org's latest Form 990", style=MUTED)
     meta = Text(datetime.now().strftime("Session started %Y-%m-%d %H:%M"), style=MUTED)
     body = Group(
@@ -67,7 +59,7 @@ def domain_finder_panel() -> Panel:
     )
     return Panel(
         Padding(body, (1, 4)),
-        box=box.HEAVY,
+        box=box.SQUARE,
         border_style=ACCENT,
     )
 
@@ -78,22 +70,22 @@ def args_table() -> Table:
         title="Run parameters",
         title_style=f"bold {ACCENT}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {ACCENT_BAR}",
         pad_edge=False,
+        expand=True,
     )
-    table.add_column("Parameter", no_wrap=True, style=EMPHASIS)
-    table.add_column("Description")
-    table.add_column("Required", justify="center", no_wrap=True)
-    table.add_column("Default", no_wrap=True, style=MUTED)
+    table.add_column("PARAMETER", no_wrap=True, style=EMPHASIS)
+    table.add_column("DESCRIPTION", style=MUTED)
+    table.add_column("REQUIRED", justify="center", no_wrap=True)
+    table.add_column("DEFAULT", no_wrap=True, style=BLUE)
 
-    table.add_row("Input path", "Path to the source CSV file", "Yes", "—")
-    table.add_row("Output path", "Destination CSV file name", "Yes", "—")
-    table.add_row("Column name", "Column containing the EIN", "No", "ein")
-    table.add_row("Start row", "First row to process", "No", "0")
-    table.add_row("End row", "Row at which processing stops", "No", "End of file")
-    table.add_row("Filings per org", "Older filings to try when the newest has no website", "No", "3")
+    table.add_row("Input path", "Path to the source CSV file", f"[bold {RED}]Yes[/]", "—")
+    table.add_row("Output path", "Destination CSV file name", f"[bold {RED}]Yes[/]", "—")
+    table.add_row("Column name", "Column containing the EIN", f"[{GREEN}]No[/]", "ein")
+    table.add_row("Start row", "First row to process", f"[{GREEN}]No[/]", "0")
+    table.add_row("End row", "Row at which processing stops", f"[{GREEN}]No[/]", "End of file")
+    table.add_row("Filings per org", "Older filings to try when the newest has no website", f"[{GREEN}]No[/]", "3")
     return table
 
 
@@ -101,12 +93,12 @@ def notes_table() -> Table:
     """What the finder can and cannot read, so a blank column is not a surprise."""
     table = Table(
         title="Before you run",
-        title_style=f"bold {ACCENT}",
+        title_style=f"bold {PURPLE}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {PURPLE_BAR}",
         pad_edge=False,
+        expand=True,
     )
     table.add_column("Note", no_wrap=True, style=EMPHASIS)
     table.add_column("Detail")
@@ -130,15 +122,15 @@ def run_summary_panel(id, start_row, end_row, found_count, time_elapsed, output_
     mins, secs = divmod(int(time_elapsed), 60)
     rows_done = end_row - start_row
     table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
-    table.add_column(style=MUTED, no_wrap=True)
+    table.add_column(style=ACCENT, no_wrap=True)
     table.add_column(style=EMPHASIS)
-    table.add_row("Run ID", id)
-    table.add_row("Rows processed", f"{start_row:,} – {end_row:,}")
+    table.add_row("Run ID", Text(id, style=PURPLE))
+    table.add_row("Rows processed", Text(f"{start_row:,} – {end_row:,}", style=PURPLE))
     table.add_row("Domains found", f"{found_count:,} of {rows_done:,}")
-    table.add_row("Elapsed time", f"{mins}m {secs}s")
-    table.add_row("Output file", output_path)
-    return Panel(table, title=Text("Run complete", style=f"bold {OK}"),
-                 title_align="left", border_style=OK, box=box.ROUNDED)
+    table.add_row("Elapsed time", Text(f"{mins}m {secs}s", style=BLUE))
+    table.add_row("Output file", Text(output_path, style=GREEN))
+    return Panel(table, title=Text(" Run complete ", style=f"bold {OK_BAR}"),
+                 title_align="left", border_style=OK, box=box.SQUARE)
 
 
 def show():
@@ -151,7 +143,7 @@ def show():
     while(status):
         input_status = True
 
-        console.print(Rule("Configuration", style=ACCENT))
+        console.print(section("Configuration"))
 
         while input_status:
             try:
@@ -172,23 +164,24 @@ def show():
                 max_filings = int(max_filings)
 
                 if col_name not in df.columns:
-                    console.print(f"[{ERR}]Column '{col_name}' is not in the file.[/] [{MUTED}]Available columns: {', '.join(df.columns)}[/]")
+                    console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Column '{col_name}' is not in the file.[/] [{MUTED}]Available columns: {', '.join(df.columns)}[/]")
                     continue
 
                 input_status = False
             except Exception as e:
-                console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Check the file path and ensure numeric fields contain whole numbers, then try again.[/]")
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Invalid input.[/] [{MUTED}]Check the file path and ensure numeric fields contain whole numbers, then try again.[/]")
 
         df_subset = df.iloc[start_row:end_row]
         BATCH = 30
         found_count = 0
 
-        console.print(Rule("Processing", style=ACCENT))
+        console.print(section("Processing"))
 
         with Progress(
             SpinnerColumn(style=ACCENT),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+            TextColumn(f"[bold {ACCENT}]{{task.description}}"),
+            BarColumn(bar_width=None, style="grey23", complete_style=OK,
+                          finished_style=OK, pulse_style=ACCENT),
             MofNCompleteColumn(),
             TextColumn(f"[{MUTED}]orgs"),
             TimeElapsedColumn(),
@@ -221,7 +214,7 @@ def show():
 
                     if domain:
                         found_count += 1
-                        progress.console.print(f"[{OK}]{result_row[col_name]} → {domain}[/]")
+                        progress.console.print(f"[{OK_BAR}] OK [/] [{MUTED}]{result_row[col_name]} → {domain}[/]")
                     else:
                         progress.console.print(f"[{MUTED}]{result_row[col_name]} → no domain on file[/]")
 

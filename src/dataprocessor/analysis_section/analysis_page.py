@@ -35,19 +35,12 @@ from rich.columns import Columns
 console = Console()
 
 # THEME ---------------------------------------------------------------------------
-# Presentation-layer constants only. Edit these to retheme the whole application.
-ACCENT = "dark_orange"
-EMPHASIS = "bold white"
-MUTED = "grey62"
-OK = "green"
-ERR = "bold red"
-
-PROMPT_STYLE = questionary.Style([
-    ("qmark", "fg:#ff8700 bold"),
-    ("question", "bold"),
-    ("answer", "fg:#ff8700"),
-    ("pointer", "fg:#ff8700 bold"),
-])
+# One shared htop palette for every screen. Edit dataprocessor/theme.py to
+# retheme the whole application; nothing here defines its own colors.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_BAR, OK_BAR, ERR_BAR, EMPHASIS, MUTED, OK, WARN, ERR,
+    CYAN, GREEN, RED, BLUE, PURPLE, PROMPT_STYLE, chip, section,
+)
 # ---------------------------------------------------------------------------------
 
 
@@ -66,7 +59,7 @@ os.environ["TERM"] = "xterm-256color"
 
 def analysis_section_panel() -> Panel:
     """Application masthead."""
-    title = Text("ANALYSIS SECTION", style=f"bold {ACCENT}")
+    title = Text(" ANALYSIS SECTION ", style=f"bold {ACCENT_BAR}")
     subtitle = Text("Batch PDF report analysis pipeline", style=MUTED)
     meta = Text(datetime.now().strftime("Session started %Y-%m-%d %H:%M"), style=MUTED)
     body = Group(
@@ -76,7 +69,7 @@ def analysis_section_panel() -> Panel:
     )
     return Panel(
         Padding(body, (1, 4)),
-        box=box.HEAVY,
+        box=box.SQUARE,
         border_style=ACCENT,
     )
 
@@ -87,22 +80,22 @@ def args_table() -> Table:
         title="Run parameters",
         title_style=f"bold {ACCENT}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {ACCENT_BAR}",
         pad_edge=False,
+        expand=True,
     )
-    table.add_column("Parameter", no_wrap=True, style=EMPHASIS)
-    table.add_column("Description")
-    table.add_column("Required", justify="center", no_wrap=True)
-    table.add_column("Default", no_wrap=True, style=MUTED)
+    table.add_column("PARAMETER", no_wrap=True, style=EMPHASIS)
+    table.add_column("DESCRIPTION", style=MUTED)
+    table.add_column("REQUIRED", justify="center", no_wrap=True)
+    table.add_column("DEFAULT", no_wrap=True, style=BLUE)
 
-    table.add_row("Input path", "Path to the source CSV file", "Yes", "\u2014")
-    table.add_row("Output path", "Destination CSV file name", "Yes", "\u2014")
-    table.add_row("Batch size", "Rows processed per batch", "Yes", "\u2014")
-    table.add_row("Start row", "First row to process", "No", "0")
-    table.add_row("End row", "Row at which processing stops", "No", "End of file")
-    table.add_row("Column name", "Column containing the PDF URL", "No", "pdf_url")
+    table.add_row("Input path", "Path to the source CSV file", f"[bold {RED}]Yes[/]", "\u2014")
+    table.add_row("Output path", "Destination CSV file name", f"[bold {RED}]Yes[/]", "\u2014")
+    table.add_row("Batch size", "Rows processed per batch", f"[bold {RED}]Yes[/]", "\u2014")
+    table.add_row("Start row", "First row to process", f"[{GREEN}]No[/]", "0")
+    table.add_row("End row", "Row at which processing stops", f"[{GREEN}]No[/]", "End of file")
+    table.add_row("Column name", "Column containing the PDF URL", f"[{GREEN}]No[/]", "pdf_url")
     return table
 
 
@@ -110,14 +103,14 @@ def run_summary_panel(id, start_row, end_row, time_elapsed, output_path) -> Pane
     """Final report card for the completed run."""
     mins, secs = divmod(int(time_elapsed), 60)
     table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
-    table.add_column(style=MUTED, no_wrap=True)
+    table.add_column(style=ACCENT, no_wrap=True)
     table.add_column(style=EMPHASIS)
-    table.add_row("Run ID", id)
-    table.add_row("Rows processed", f"{start_row:,} \u2013 {end_row:,}")
-    table.add_row("Elapsed time", f"{mins}m {secs}s")
-    table.add_row("Output file", output_path)
-    return Panel(table, title=Text("Run complete", style=f"bold {OK}"),
-                 title_align="left", border_style=OK, box=box.ROUNDED)
+    table.add_row("Run ID", Text(id, style=PURPLE))
+    table.add_row("Rows processed", Text(f"{start_row:,} \u2013 {end_row:,}", style=PURPLE))
+    table.add_row("Elapsed time", Text(f"{mins}m {secs}s", style=BLUE))
+    table.add_row("Output file", Text(output_path, style=GREEN))
+    return Panel(table, title=Text(" Run complete ", style=f"bold {OK_BAR}"),
+                 title_align="left", border_style=OK, box=box.SQUARE)
 
 
 def show():
@@ -135,7 +128,7 @@ def show():
 
         input_status = True
 
-        console.print(Rule("Configuration", style=ACCENT))
+        console.print(section("Configuration"))
 
         while input_status:
             try:
@@ -156,34 +149,35 @@ def show():
                 batch_size = int(batch_size)
                 input_status = False
             except Exception as e:
-                console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Check the file path and ensure numeric fields contain whole numbers, then try again.[/]")
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Invalid input.[/] [{MUTED}]Check the file path and ensure numeric fields contain whole numbers, then try again.[/]")
 
 
 
         deep_key = os.getenv("DeepSeek_key")
         if deep_key is None:
-            console.print(f"[{ERR}]DeepSeek API key not found.[/] [{MUTED}]Add DeepSeek_key to the .env file and restart the application.[/]")
+            console.print(f"[{ERR_BAR}] ERR [/] [{RED}]DeepSeek API key not found.[/] [{MUTED}]Add DeepSeek_key to the .env file and restart the application.[/]")
             return
 
         gpt_key = os.getenv("GPT_key")
         if gpt_key is None:
-            console.print(f"[{ERR}]GPT API key not found.[/] [{MUTED}]Add GPT_key to the .env file and restart the application.[/]")
+            console.print(f"[{ERR_BAR}] ERR [/] [{RED}]GPT API key not found.[/] [{MUTED}]Add GPT_key to the .env file and restart the application.[/]")
             return
 
         gemini_key = os.getenv("Gemini_key")
         if gemini_key is None:
-            console.print(f"[{ERR}]Gemini API key not found.[/] [{MUTED}]Add Gemini_key to the .env file and restart the application.[/]")
+            console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Gemini API key not found.[/] [{MUTED}]Add Gemini_key to the .env file and restart the application.[/]")
             return
 
         df_subset = df.iloc[start_row:end_row]
         total_batches = (len(df_subset) + batch_size - 1) // batch_size
 
-        console.print(Rule("Processing", style=ACCENT))
+        console.print(section("Processing"))
 
         with Progress(
             SpinnerColumn(style=ACCENT),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+            TextColumn(f"[bold {ACCENT}]{{task.description}}"),
+            BarColumn(bar_width=None, style="grey23", complete_style=OK,
+                          finished_style=OK, pulse_style=ACCENT),
             MofNCompleteColumn(),
             TextColumn(f"[{MUTED}]batches"),
             TimeElapsedColumn(),

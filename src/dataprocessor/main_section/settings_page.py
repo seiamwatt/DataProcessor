@@ -29,6 +29,14 @@ import os
 from dataprocessor.main_section import main_util
 import sys
 from rich.columns import Columns
+# THEME ---------------------------------------------------------------------------
+# One shared htop palette for every screen. Edit dataprocessor/theme.py to
+# retheme the whole application; nothing here defines its own colors.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_DIM, ACCENT_BAR, OK_BAR, PURPLE_BAR, GREEN_BAR, ERR_BAR, EMPHASIS, MUTED, OK, ERR,
+    CYAN, GREEN, RED, BLUE, PURPLE, chip, section,
+)
+# ---------------------------------------------------------------------------------
 # SETUP ---------------------------------------------------------------------------
 version = os.getenv("version")
 deep_key = os.getenv("DeepSeek_key")
@@ -38,35 +46,39 @@ gpt_key = os.getenv("GPT_key")
 
 def key_table() -> Table:
 
-    table = Table(title = "")
+    table = Table(title="", box=None, pad_edge=False, expand=True,
+                  header_style=f"bold {PURPLE_BAR}")
 
-    table.add_column("LLM")
-    table.add_column("Value")
+    table.add_column("LLM", style=EMPHASIS)
+    table.add_column("VALUE", style=PURPLE)
     table.add_row("DeepSeek",deep_key)
     table.add_row("GPT",gpt_key)
     table.add_row("Gemini",gemini_key)
     return table
 
 def key_panel() -> Panel:
-    return Panel(key_table(),title = "[bold red]Keys",title_align="left",highlight=True)
+    return Panel(key_table(), title=chip("Keys", PURPLE_BAR), title_align="left",
+                 border_style=ACCENT_DIM, box=box.SQUARE)
 
 def status_panel() -> Panel:
     deep_status = main_util.DeepSeek_connect_test()
     gpt_status = main_util.GTP_connect_test()
     gemini_status = main_util.Gemini_connect_test()
 
-    online = "[bold green]Online"
-    offline = "[bold red]Offline"
+    online = f"[{OK_BAR}] ONLINE [/]"
+    offline = f"[{ERR_BAR}] OFFLINE [/]"
 
-    table = Table(box=box.SIMPLE, expand=True, show_header=True)
-    table.add_column("LLM", ratio=1)
-    table.add_column("Status", ratio=1)
+    table = Table(box=None, pad_edge=False, expand=True, show_header=True,
+                  header_style=f"bold {GREEN_BAR}")
+    table.add_column("LLM", ratio=1, style=EMPHASIS)
+    table.add_column("STATUS", ratio=1)
 
     table.add_row("DeepSeek", online if deep_status else offline)
     table.add_row("GPT", online if gpt_status else offline)
     table.add_row("Gemini", online if gemini_status else offline)
 
-    return Panel(table, title="[bold red]LLM Status", title_align="left", highlight=True)
+    return Panel(table, title=chip("LLM Status", GREEN_BAR), title_align="left",
+                 border_style=ACCENT_DIM, box=box.SQUARE)
 
 def filter_overview_panel() -> Panel:
     overview = (
@@ -81,7 +93,8 @@ def filter_overview_panel() -> Panel:
         "   — [bold]reason[/bold] for the classification\n\n"
         "5. Results are saved progressively to an output CSV in batches"
     )
-    return Panel(overview, title="[bold green]Filter Process Overview",title_align="left",highlight=True)
+    return Panel(overview, title=chip("Filter Process Overview", PURPLE_BAR), title_align="left",
+                 border_style=ACCENT_DIM, box=box.SQUARE)
 
 def analysis_overview_panel() -> Panel:
     overview = (
@@ -97,7 +110,8 @@ def analysis_overview_panel() -> Panel:
         "   and a shared [bold]UUID[/bold] to link the 3 results back to the same source row\n\n"
         "5. Results are saved progressively to an output CSV in batches"
     )
-    return Panel(overview, title="[bold green]Analysis Process Overview", title_align="left", highlight=True)
+    return Panel(overview, title=chip("Analysis Process Overview", PURPLE_BAR), title_align="left",
+                 border_style=ACCENT_DIM, box=box.SQUARE)
 
 
 
@@ -106,7 +120,7 @@ def show():
 
     # ── Header ──────────────────────────────────────────────────────
     console.print()
-    console.print(Rule("[bold blue]  DataProcessor  ", style="blue"))
+    console.print(section("DataProcessor"))
     console.print()
 
     # ── Main content: overviews left, status right ───────────────────
@@ -125,7 +139,7 @@ def show():
 
     # ── Footer ───────────────────────────────────────────────────────
     console.print()
-    console.print(Rule(f"[dim]Version {version}[/dim]", style="dim"))
+    console.print(Rule(f"[{MUTED}]Version {version}[/]", style=MUTED))
     console.print()
 if __name__ == "__main__":
     show()

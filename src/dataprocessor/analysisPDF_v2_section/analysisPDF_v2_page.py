@@ -42,19 +42,12 @@ console = Console()
 os.environ["TERM"] = "xterm-256color"
 
 # THEME ---------------------------------------------------------------------------
-# Presentation-layer constants only. Edit these to retheme the whole application.
-ACCENT = "cyan"
-EMPHASIS = "bold white"
-MUTED = "grey62"
-OK = "green"
-ERR = "bold red"
-
-PROMPT_STYLE = questionary.Style([
-    ("qmark", "fg:#00d7ff bold"),
-    ("question", "bold"),
-    ("answer", "fg:#00d7ff"),
-    ("pointer", "fg:#00d7ff bold"),
-])
+# One shared htop palette for every screen. Edit dataprocessor/theme.py to
+# retheme the whole application; nothing here defines its own colors.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_BAR, OK_BAR, GREEN_BAR, ERR_BAR, EMPHASIS, MUTED, OK, WARN, ERR,
+    CYAN, GREEN, RED, BLUE, PURPLE, PROMPT_STYLE, chip, section,
+)
 # ---------------------------------------------------------------------------------
 
 
@@ -70,7 +63,7 @@ load_env()
 
 def banner_panel() -> Panel:
     """Application masthead."""
-    title = Text("ANALYSIS SECTION \u2014 PDF V2", style=f"bold {ACCENT}")
+    title = Text(" ANALYSIS SECTION \u2014 PDF V2 ", style=f"bold {ACCENT_BAR}")
     subtitle = Text("PDF annual report coding pipeline", style=MUTED)
     meta = Text(datetime.now().strftime("Session started %Y-%m-%d %H:%M"), style=MUTED)
     body = Group(
@@ -80,7 +73,7 @@ def banner_panel() -> Panel:
     )
     return Panel(
         Padding(body, (1, 4)),
-        box=box.HEAVY,
+        box=box.SQUARE,
         border_style=ACCENT,
     )
 
@@ -91,21 +84,21 @@ def args_table() -> Table:
         title="Run parameters",
         title_style=f"bold {ACCENT}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {ACCENT_BAR}",
         pad_edge=False,
+        expand=True,
     )
-    table.add_column("Parameter", no_wrap=True, style=EMPHASIS)
-    table.add_column("Description")
-    table.add_column("Required", justify="center", no_wrap=True)
-    table.add_column("Default", no_wrap=True, style=MUTED)
+    table.add_column("PARAMETER", no_wrap=True, style=EMPHASIS)
+    table.add_column("DESCRIPTION", style=MUTED)
+    table.add_column("REQUIRED", justify="center", no_wrap=True)
+    table.add_column("DEFAULT", no_wrap=True, style=BLUE)
 
-    table.add_row("PDF directory", "Folder containing PDF files (searched recursively)", "Yes", "\u2014")
-    table.add_row("Output CSV", "Output CSV file path", "Yes", "\u2014")
-    table.add_row("Start PDF", "Index of the first PDF to process", "No", "0")
-    table.add_row("End PDF", "Index of the last PDF to process", "No", "Total PDFs found")
-    table.add_row("Max pages", "Maximum pages to extract per PDF", "No", "2000")
+    table.add_row("PDF directory", "Folder containing PDF files (searched recursively)", f"[bold {RED}]Yes[/]", "\u2014")
+    table.add_row("Output CSV", "Output CSV file path", f"[bold {RED}]Yes[/]", "\u2014")
+    table.add_row("Start PDF", "Index of the first PDF to process", f"[{GREEN}]No[/]", "0")
+    table.add_row("End PDF", "Index of the last PDF to process", f"[{GREEN}]No[/]", "Total PDFs found")
+    table.add_row("Max pages", "Maximum pages to extract per PDF", f"[{GREEN}]No[/]", "2000")
     return table
 
 
@@ -113,12 +106,12 @@ def api_status_table(deep_ok: bool, gemini_ok: bool, gpt_ok: bool) -> Table:
     """Environment check: one row per provider."""
     table = Table(
         title="Environment check",
-        title_style=f"bold {ACCENT}",
+        title_style=f"bold {GREEN}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {GREEN_BAR}",
         pad_edge=False,
+        expand=True,
     )
     table.add_column("Provider", no_wrap=True, style=EMPHASIS)
     table.add_column("API key", justify="center", no_wrap=True)
@@ -136,14 +129,14 @@ def processing_end_panel(total_pdfs: int, elapsed: float, output_path: str, run_
     """Final report card for the completed run."""
     mins, secs = divmod(int(elapsed), 60)
     table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
-    table.add_column(style=MUTED, no_wrap=True)
+    table.add_column(style=ACCENT, no_wrap=True)
     table.add_column(style=EMPHASIS)
-    table.add_row("Run ID", run_id)
+    table.add_row("Run ID", Text(run_id, style=PURPLE))
     table.add_row("PDFs processed", f"{total_pdfs:,}")
-    table.add_row("Elapsed time", f"{mins}m {secs}s")
-    table.add_row("Output file", output_path)
-    return Panel(table, title=Text("Run complete", style=f"bold {OK}"),
-                 title_align="left", border_style=OK, box=box.ROUNDED)
+    table.add_row("Elapsed time", Text(f"{mins}m {secs}s", style=BLUE))
+    table.add_row("Output file", Text(output_path, style=GREEN))
+    return Panel(table, title=Text(" Run complete ", style=f"bold {OK_BAR}"),
+                 title_align="left", border_style=OK, box=box.SQUARE)
 
 
 # -- Single PDF processor (with console output) --------------------------------
@@ -223,12 +216,12 @@ def show():
         missing.append("GPT_key")
 
     if missing:
-        console.print(f"[{ERR}]Missing API keys in .env: {', '.join(missing)}.[/] [{MUTED}]Add them and restart the application.[/]")
+        console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Missing API keys in .env: {', '.join(missing)}.[/] [{MUTED}]Add them and restart the application.[/]")
         return
 
     # -- Session loop ------------------------------------------------------
     while status:
-        console.print(Rule("Configuration", style=ACCENT))
+        console.print(section("Configuration"))
         input_valid = False
 
         while not input_valid:
@@ -239,14 +232,14 @@ def show():
                 pdf_dir = pdf_dir.strip("'\"")
 
                 if not os.path.isdir(pdf_dir):
-                    console.print(f"[{ERR}]Directory not found.[/] [{MUTED}]Check the path and try again.[/]")
+                    console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Directory not found.[/] [{MUTED}]Check the path and try again.[/]")
                     continue
 
                 pdf_files = sorted(
                     glob.glob(os.path.join(pdf_dir, "**", "*.pdf"), recursive=True)
                 )
                 if not pdf_files:
-                    console.print(f"[{ERR}]No PDF files were found in that directory.[/]")
+                    console.print(f"[{ERR_BAR}] ERR [/] [{RED}]No PDF files were found in that directory.[/]")
                     continue
 
                 console.print(f"[{MUTED}]Found {len(pdf_files):,} PDF file(s).[/]")
@@ -284,20 +277,21 @@ def show():
             except KeyboardInterrupt:
                 return
             except Exception:
-                console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Ensure numeric fields contain whole numbers, then try again.[/]")
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Invalid input.[/] [{MUTED}]Ensure numeric fields contain whole numbers, then try again.[/]")
 
         # -- Processing --------------------------------------------------
         pdf_subset = pdf_files[start_pdf:end_pdf]
         total = len(pdf_subset)
-        console.print(Rule("Processing", style=ACCENT))
+        console.print(section("Processing"))
         console.print(f"[{MUTED}]Processing PDFs {start_pdf}\u2013{end_pdf - 1} ({total:,} file(s)).[/]")
         results = []
         time_start = time.time()
 
         with Progress(
             SpinnerColumn(style=ACCENT),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+            TextColumn(f"[bold {ACCENT}]{{task.description}}"),
+            BarColumn(bar_width=None, style="grey23", complete_style=OK,
+                          finished_style=OK, pulse_style=ACCENT),
             MofNCompleteColumn(),
             TextColumn(f"[{MUTED}]files"),
             TimeElapsedColumn(),

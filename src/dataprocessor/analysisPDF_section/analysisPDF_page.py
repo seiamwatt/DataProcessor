@@ -39,20 +39,12 @@ from dataprocessor.analysisPDF_section import report_analysis_pdfs
 console = Console()
 
 # THEME ---------------------------------------------------------------------------
-# Presentation-layer constants only. Edit these to retheme the whole application.
-ACCENT = "gold1"
-EMPHASIS = "bold white"
-MUTED = "grey62"
-OK = "green"
-WARN = "yellow"
-ERR = "bold red"
-
-PROMPT_STYLE = questionary.Style([
-    ("qmark", "fg:#ffd700 bold"),
-    ("question", "bold"),
-    ("answer", "fg:#ffd700"),
-    ("pointer", "fg:#ffd700 bold"),
-])
+# One shared htop palette for every screen. Edit dataprocessor/theme.py to
+# retheme the whole application; nothing here defines its own colors.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_BAR, OK_BAR, ERR_BAR, EMPHASIS, MUTED, OK, WARN, ERR,
+    CYAN, GREEN, RED, BLUE, PURPLE, PROMPT_STYLE, chip, section,
+)
 # ---------------------------------------------------------------------------------
 
 
@@ -70,7 +62,7 @@ os.environ["TERM"] = "xterm-256color"
 
 def analysis_section_panel() -> Panel:
     """Application masthead."""
-    title = Text("ANALYSIS SECTION \u2014 PDF", style=f"bold {ACCENT}")
+    title = Text(" ANALYSIS SECTION \u2014 PDF ", style=f"bold {ACCENT_BAR}")
     subtitle = Text("Directory-based PDF analysis pipeline", style=MUTED)
     meta = Text(datetime.now().strftime("Session started %Y-%m-%d %H:%M"), style=MUTED)
     body = Group(
@@ -80,7 +72,7 @@ def analysis_section_panel() -> Panel:
     )
     return Panel(
         Padding(body, (1, 4)),
-        box=box.HEAVY,
+        box=box.SQUARE,
         border_style=ACCENT,
     )
 
@@ -91,20 +83,20 @@ def args_table() -> Table:
         title="Run parameters",
         title_style=f"bold {ACCENT}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {ACCENT_BAR}",
         pad_edge=False,
+        expand=True,
     )
-    table.add_column("Parameter", no_wrap=True, style=EMPHASIS)
-    table.add_column("Description")
-    table.add_column("Required", justify="center", no_wrap=True)
-    table.add_column("Default", no_wrap=True, style=MUTED)
+    table.add_column("PARAMETER", no_wrap=True, style=EMPHASIS)
+    table.add_column("DESCRIPTION", style=MUTED)
+    table.add_column("REQUIRED", justify="center", no_wrap=True)
+    table.add_column("DEFAULT", no_wrap=True, style=BLUE)
 
-    table.add_row("Input directory", "Directory containing the PDF files", "Yes", "\u2014")
-    table.add_row("Output name", "Output CSV file name, saved in the input directory", "Yes", "output.csv")
-    table.add_row("Batch size", "Rows processed per batch", "No", "3")
-    table.add_row("Start at", "PDF number to start from (1-based); later PDFs append", "No", "1 (first PDF)")
+    table.add_row("Input directory", "Directory containing the PDF files", f"[bold {RED}]Yes[/]", "\u2014")
+    table.add_row("Output name", "Output CSV file name, saved in the input directory", f"[bold {RED}]Yes[/]", "output.csv")
+    table.add_row("Batch size", "Rows processed per batch", f"[{GREEN}]No[/]", "3")
+    table.add_row("Start at", "PDF number to start from (1-based); later PDFs append", f"[{GREEN}]No[/]", "1 (first PDF)")
     return table
 
 
@@ -112,16 +104,16 @@ def run_summary_panel(num_total, start_at, pdf_processed_count, skipped, elapsed
     """Final report card for the completed run."""
     mins, secs = divmod(int(elapsed), 60)
     table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
-    table.add_column(style=MUTED, no_wrap=True)
+    table.add_column(style=ACCENT, no_wrap=True)
     table.add_column(style=EMPHASIS)
     table.add_row("PDFs in directory", f"{num_total:,}")
-    table.add_row("Started at", f"#{start_at}")
-    table.add_row("Processed", f"{pdf_processed_count:,}")
-    table.add_row("Skipped", f"{skipped:,}")
-    table.add_row("Elapsed time", f"{mins}m {secs}s")
-    table.add_row("Output file", output_path)
-    return Panel(table, title=Text("Run complete", style=f"bold {OK}"),
-                 title_align="left", border_style=OK, box=box.ROUNDED)
+    table.add_row("Started at", Text(f"#{start_at}", style=BLUE))
+    table.add_row("Processed", Text(f"{pdf_processed_count:,}", style=PURPLE))
+    table.add_row("Skipped", Text(f"{skipped:,}", style=PURPLE))
+    table.add_row("Elapsed time", Text(f"{mins}m {secs}s", style=BLUE))
+    table.add_row("Output file", Text(output_path, style=GREEN))
+    return Panel(table, title=Text(" Run complete ", style=f"bold {OK_BAR}"),
+                 title_align="left", border_style=OK, box=box.SQUARE)
 
 
 def show():
@@ -136,7 +128,7 @@ def show():
     while status:
         input_status = True
 
-        console.print(Rule("Configuration", style=ACCENT))
+        console.print(section("Configuration"))
 
         while input_status:
             try:
@@ -148,7 +140,7 @@ def show():
 
                 # Validate that input_path is actually a directory
                 if not os.path.isdir(input_path):
-                    console.print(f"[{ERR}]Input path is not a valid directory.[/] [{MUTED}]Provide the path to a folder, not a file.[/]")
+                    console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Input path is not a valid directory.[/] [{MUTED}]Provide the path to a folder, not a file.[/]")
                     continue
 
                 output_name = questionary.text(
@@ -182,7 +174,7 @@ def show():
                 num_total = len(all_pdf_files)
 
                 if num_total == 0:
-                    console.print(f"[{ERR}]No PDF files were found in the directory.[/] [{MUTED}]Check the path and try again.[/]")
+                    console.print(f"[{ERR_BAR}] ERR [/] [{RED}]No PDF files were found in the directory.[/] [{MUTED}]Check the path and try again.[/]")
                     continue
 
                 console.print(f"[{MUTED}]Found {num_total:,} PDF files in the directory.[/]")
@@ -203,30 +195,30 @@ def show():
                 input_status = False
 
             except ValueError:
-                console.print(f"[{ERR}]Batch size and start position must be whole numbers.[/]")
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Batch size and start position must be whole numbers.[/]")
             except Exception as e:
-                console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]{e}[/]")
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Invalid input.[/] [{MUTED}]{e}[/]")
 
         deep_key = os.getenv("DeepSeek_key")
         if deep_key is None:
-            console.print(f"[{ERR}]DeepSeek API key not found.[/] [{MUTED}]Add DeepSeek_key to the .env file and restart the application.[/]")
+            console.print(f"[{ERR_BAR}] ERR [/] [{RED}]DeepSeek API key not found.[/] [{MUTED}]Add DeepSeek_key to the .env file and restart the application.[/]")
             return
 
         gpt_key = os.getenv("GPT_key")
         if gpt_key is None:
-            console.print(f"[{ERR}]GPT API key not found.[/] [{MUTED}]Add GPT_key to the .env file and restart the application.[/]")
+            console.print(f"[{ERR_BAR}] ERR [/] [{RED}]GPT API key not found.[/] [{MUTED}]Add GPT_key to the .env file and restart the application.[/]")
             return
 
         gemini_key = os.getenv("Gemini_key")
         if gemini_key is None:
-            console.print(f"[{ERR}]Gemini API key not found.[/] [{MUTED}]Add Gemini_key to the .env file and restart the application.[/]")
+            console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Gemini API key not found.[/] [{MUTED}]Add Gemini_key to the .env file and restart the application.[/]")
             return
 
         # Slice the list from the chosen start position (1-based -> 0-based)
         pdf_files = all_pdf_files[start_at - 1 :]
         num_pdfs = len(pdf_files)
 
-        console.print(Rule("Processing", style=ACCENT))
+        console.print(section("Processing"))
         console.print(
             f"[{MUTED}]{num_total:,} PDFs found. Starting from #{start_at} "
             f"({num_pdfs:,} to process). Output: {output_path}[/]"
@@ -238,8 +230,9 @@ def show():
 
         with Progress(
             SpinnerColumn(style=ACCENT),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+            TextColumn(f"[bold {ACCENT}]{{task.description}}"),
+            BarColumn(bar_width=None, style="grey23", complete_style=OK,
+                          finished_style=OK, pulse_style=ACCENT),
             MofNCompleteColumn(),
             TextColumn(f"[{MUTED}]files"),
             TimeElapsedColumn(),

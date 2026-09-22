@@ -39,20 +39,12 @@ from dataprocessor.propublica_section import propublica_logic
 console = Console()
 
 # THEME ---------------------------------------------------------------------------
-# Presentation-layer constants only. Edit these to retheme the whole application.
-ACCENT = "blue3"
-EMPHASIS = "bold white"
-MUTED = "grey62"
-OK = "green"
-WARN = "yellow"
-ERR = "bold red"
-
-PROMPT_STYLE = questionary.Style([
-    ("qmark", "fg:#0000d7 bold"),
-    ("question", "bold"),
-    ("answer", "fg:#0000d7"),
-    ("pointer", "fg:#0000d7 bold"),
-])
+# One shared htop palette for every screen. Edit dataprocessor/theme.py to
+# retheme the whole application; nothing here defines its own colors.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_BAR, OK_BAR, PURPLE_BAR, ERR_BAR, EMPHASIS, MUTED, OK, WARN, ERR,
+    CYAN, GREEN, RED, BLUE, PURPLE, PROMPT_STYLE, chip, section,
+)
 # ---------------------------------------------------------------------------------
 
 
@@ -66,7 +58,7 @@ def resource_path(relative_path):
 load_env()
 def banner_panel() -> Panel:
     """Application masthead."""
-    title = Text("PROPUBLICA NONPROFIT EXPLORER", style=f"bold {ACCENT}")
+    title = Text(" PROPUBLICA NONPROFIT EXPLORER ", style=f"bold {ACCENT_BAR}")
     subtitle = Text("Nonprofit data collection pipeline \u2014 output to local CSV", style=MUTED)
     meta = Text(datetime.now().strftime("Session started %Y-%m-%d %H:%M"), style=MUTED)
     body = Group(
@@ -76,7 +68,7 @@ def banner_panel() -> Panel:
     )
     return Panel(
         Padding(body, (1, 4)),
-        box=box.HEAVY,
+        box=box.SQUARE,
         border_style=ACCENT,
     )
 
@@ -87,20 +79,21 @@ def args_table() -> Table:
         title="Run parameters",
         title_style=f"bold {ACCENT}",
         title_justify="left",
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {ACCENT_BAR}",
         pad_edge=False,
+        expand=True,
     )
-    table.add_column("Parameter", no_wrap=True, style=EMPHASIS)
-    table.add_column("Description")
-    table.add_column("Required", justify="center", no_wrap=True)
-    table.add_column("Default", no_wrap=True, style=MUTED)
+    table.add_column("PARAMETER", no_wrap=True, style=EMPHASIS)
+    table.add_column("DESCRIPTION", style=MUTED)
+    table.add_column("REQUIRED", justify="center", no_wrap=True)
+    table.add_column("DEFAULT", no_wrap=True, style=BLUE)
 
-    table.add_row("Input CSV", "Existing CSV to append results, or a folder for a new file", "Yes", "\u2014")
-    table.add_row("NTEE category", "NTEE code category (1\u201310, see index)", "Yes", "\u2014")
-    table.add_row("Number of pages", "Pages to process per request", "Yes", "500")
-    table.add_row("Start state index", "First state index to process", "No", "0")
-    table.add_row("End state index", "Last state index to process", "No", "57")
+    table.add_row("Input CSV", "Existing CSV to append results, or a folder for a new file", f"[bold {RED}]Yes[/]", "\u2014")
+    table.add_row("NTEE category", "NTEE code category (1\u201310, see index)", f"[bold {RED}]Yes[/]", "\u2014")
+    table.add_row("Number of pages", "Pages to process per request", f"[bold {RED}]Yes[/]", "500")
+    table.add_row("Start state index", "First state index to process", f"[{GREEN}]No[/]", "0")
+    table.add_row("End state index", "Last state index to process", f"[{GREEN}]No[/]", "57")
     return table
 
 
@@ -108,12 +101,12 @@ def propublica_index() -> Table:
     """Reference index of NTEE categories."""
     table = Table(
         title="NTEE category index",
-        title_style=f"bold {ACCENT}",
+        title_style=f"bold {PURPLE}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {PURPLE_BAR}",
         pad_edge=False,
+        expand=True,
     )
     table.add_column("ID", justify="center", no_wrap=True, style=EMPHASIS)
     table.add_column("Category")
@@ -151,12 +144,12 @@ def display_tables():
 def run_summary_panel(rows_appended: int, output_path: str) -> Panel:
     """Final report card for the completed run."""
     table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
-    table.add_column(style=MUTED, no_wrap=True)
+    table.add_column(style=ACCENT, no_wrap=True)
     table.add_column(style=EMPHASIS)
     table.add_row("Rows appended", f"{rows_appended:,}")
-    table.add_row("Output file", output_path)
-    return Panel(table, title=Text("Run complete", style=f"bold {OK}"),
-                 title_align="left", border_style=OK, box=box.ROUNDED)
+    table.add_row("Output file", Text(output_path, style=GREEN))
+    return Panel(table, title=Text(" Run complete ", style=f"bold {OK_BAR}"),
+                 title_align="left", border_style=OK, box=box.SQUARE)
 
 
 def show():
@@ -170,7 +163,7 @@ def show():
     status = True
 
     while status:
-        console.print(Rule("Configuration", style=ACCENT))
+        console.print(section("Configuration"))
         input_valid = False
 
         while not input_valid:
@@ -185,7 +178,7 @@ def show():
                     input_csv_path = os.path.join(input_csv_path, "output.csv")
                     console.print(f"[{MUTED}]A new file will be created: {input_csv_path}[/]")
                 else:
-                    console.print(f"[{ERR}]Path is not a valid file or folder.[/] [{MUTED}]Provide an existing CSV file or a folder, then try again.[/]")
+                    console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Path is not a valid file or folder.[/] [{MUTED}]Provide an existing CSV file or a folder, then try again.[/]")
                     continue
                 ntee_code_catagory = questionary.text("NTEE code category (1\u201310)", style=PROMPT_STYLE).ask()
                 # ntee_code = questionary.text("NTEE code (e.g. A01)").ask()
@@ -201,9 +194,9 @@ def show():
 
                 input_valid = True
             except Exception as e:
-                console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Ensure numeric fields contain whole numbers, then try again.[/]")
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Invalid input.[/] [{MUTED}]Ensure numeric fields contain whole numbers, then try again.[/]")
 
-        console.print(Rule("Processing", style=ACCENT))
+        console.print(section("Processing"))
 
         with console.status(f"[{ACCENT}]Collecting data from ProPublica...", spinner="dots"):
             results = propublica_logic.populate_data(

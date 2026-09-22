@@ -44,19 +44,12 @@ console = Console()
 os.environ["TERM"] = "xterm-256color"
 
 # THEME ---------------------------------------------------------------------------
-# Presentation-layer constants only. Edit these to retheme the whole application.
-ACCENT = "dodger_blue1"
-EMPHASIS = "bold white"
-MUTED = "grey62"
-OK = "green"
-ERR = "bold red"
-
-PROMPT_STYLE = questionary.Style([
-    ("qmark", "fg:#0087ff bold"),
-    ("question", "bold"),
-    ("answer", "fg:#0087ff"),
-    ("pointer", "fg:#0087ff bold"),
-])
+# One shared htop palette for every screen. Edit dataprocessor/theme.py to
+# retheme the whole application; nothing here defines its own colors.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_BAR, OK_BAR, ERR_BAR, EMPHASIS, MUTED, OK, WARN, ERR,
+    CYAN, GREEN, RED, BLUE, PURPLE, PROMPT_STYLE, chip, section,
+)
 # ---------------------------------------------------------------------------------
 
 
@@ -68,7 +61,7 @@ def resource_path(relative_path):
 load_env()
 def filter_section_panel() -> Panel:
     """Application masthead."""
-    title = Text("FILTER SECTION", style=f"bold {ACCENT}")
+    title = Text(" FILTER SECTION ", style=f"bold {ACCENT_BAR}")
     subtitle = Text("Batch PDF report filtering pipeline", style=MUTED)
     meta = Text(datetime.now().strftime("Session started %Y-%m-%d %H:%M"), style=MUTED)
     body = Group(
@@ -78,7 +71,7 @@ def filter_section_panel() -> Panel:
     )
     return Panel(
         Padding(body, (1, 4)),
-        box=box.HEAVY,
+        box=box.SQUARE,
         border_style=ACCENT,
     )
 
@@ -89,22 +82,25 @@ def args_table() -> Table:
         title="Run parameters",
         title_style=f"bold {ACCENT}",
         title_justify="left",
-        box=box.SIMPLE_HEAVY,
-        border_style=MUTED,
-        header_style=f"bold {ACCENT}",
+        box=None,
+        header_style=f"bold {ACCENT_BAR}",
         pad_edge=False,
+        expand=True,
     )
-    table.add_column("Parameter", no_wrap=True, style=EMPHASIS)
-    table.add_column("Description")
-    table.add_column("Required", justify="center", no_wrap=True)
-    table.add_column("Default", no_wrap=True, style=MUTED)
+    table.add_column("PARAMETER", no_wrap=True, style=EMPHASIS)
+    table.add_column("DESCRIPTION", style=MUTED)
+    table.add_column("REQUIRED", justify="center", no_wrap=True)
+    table.add_column("DEFAULT", no_wrap=True, style=BLUE)
 
-    table.add_row("Input path", "Path to the source CSV file", "Yes", "\u2014")
-    table.add_row("Output path", "Destination CSV file name", "Yes", "\u2014")
-    table.add_row("Batch size", "Rows processed per batch", "Yes", "\u2014")
-    table.add_row("Start row", "First row to process", "No", "0")
-    table.add_row("End row", "Row at which processing stops", "No", "End of file")
-    table.add_row("Column name", "Column containing the PDF URL", "No", "pdf_url")
+    required = Text("Yes", style=f"bold {RED}")
+    optional = Text("No", style=GREEN)
+
+    table.add_row("Input path", "Path to the source CSV file", required, "\u2014")
+    table.add_row("Output path", "Destination CSV file name", required, "\u2014")
+    table.add_row("Batch size", "Rows processed per batch", required, "\u2014")
+    table.add_row("Start row", "First row to process", optional, "0")
+    table.add_row("End row", "Row at which processing stops", optional, "End of file")
+    table.add_row("Column name", "Column containing the PDF URL", optional, "pdf_url")
     return table
 
 
@@ -112,18 +108,18 @@ def run_summary_panel(id, start_row, end_row, time_elapsed, output_path) -> Pane
     """Final report card for the completed run."""
     mins, secs = divmod(int(time_elapsed), 60)
     table = Table(box=box.SIMPLE, show_header=False, pad_edge=False)
-    table.add_column(style=MUTED, no_wrap=True)
+    table.add_column(style=ACCENT, no_wrap=True)
     table.add_column(style=EMPHASIS)
-    table.add_row("Run ID", id)
-    table.add_row("Rows processed", f"{start_row:,} \u2013 {end_row:,}")
-    table.add_row("Elapsed time", f"{mins}m {secs}s")
-    table.add_row("Output file", output_path)
-    return Panel(table, title=Text("Run complete", style=f"bold {OK}"),
-                 title_align="left", border_style=OK, box=box.ROUNDED)
+    table.add_row("Run ID", Text(id, style=PURPLE))
+    table.add_row("Rows processed", Text(f"{start_row:,} \u2013 {end_row:,}", style=PURPLE))
+    table.add_row("Elapsed time", Text(f"{mins}m {secs}s", style=BLUE))
+    table.add_row("Output file", Text(output_path, style=GREEN))
+    return Panel(table, title=Text(" Run complete ", style=f"bold {OK_BAR}"),
+                 title_align="left", border_style=OK, box=box.SQUARE)
 
 
 def upload_to_s3(input_path, output_path):
-    console.print(Rule("Upload", style=ACCENT))
+    console.print(Rule(Text(" Upload ", style=ACCENT_BAR), style=ACCENT))
 
     s3 = boto3.client('s3', region_name='us-east-2')
 
@@ -134,15 +130,15 @@ def upload_to_s3(input_path, output_path):
     with console.status(f"[{ACCENT}]Uploading files to S3...", spinner="dots"):
         try:
             s3.upload_file(input_path, 'dataprocessor-input-bucket', f"input_{display_time}.csv")
-            console.print(f"[{OK}]Input file uploaded.[/]")
+            console.print(f"[{OK_BAR}] OK [/] [{MUTED}]Input file uploaded.[/]")
         except Exception as e:
-            console.print(f"[{ERR}]Input file upload failed.[/] [{MUTED}]{type(e).__name__}: {e}[/]")
+            console.print(f"[{ERR_BAR}] FAIL [/] [{RED}]Input file upload failed.[/] [{MUTED}]{type(e).__name__}: {e}[/]")
 
         try:
             s3.upload_file(output_path, 'dataprocessor-output-bucket', f"output_{display_time}.csv")
-            console.print(f"[{OK}]Output file uploaded.[/]")
+            console.print(f"[{OK_BAR}] OK [/] [{MUTED}]Output file uploaded.[/]")
         except Exception as e:
-            console.print(f"[{ERR}]Output file upload failed.[/] [{MUTED}]{type(e).__name__}: {e}[/]")
+            console.print(f"[{ERR_BAR}] FAIL [/] [{RED}]Output file upload failed.[/] [{MUTED}]{type(e).__name__}: {e}[/]")
 
     console.print(f"[{MUTED}]Upload stage finished.[/]")
 
@@ -159,7 +155,7 @@ def show():
     while(status):
         input_status = True
 
-        console.print(Rule("Configuration", style=ACCENT))
+        console.print(Rule(Text(" Configuration ", style=ACCENT_BAR), style=ACCENT))
 
         while input_status:
             try:
@@ -180,26 +176,27 @@ def show():
                 end_row = int(end_row)
                 input_status = False
             except Exception as e:
-                console.print(f"[{ERR}]Invalid input.[/] [{MUTED}]Check the file path and ensure numeric fields contain whole numbers, then try again.[/]")
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Invalid input.[/] [{MUTED}]Check the file path and ensure numeric fields contain whole numbers, then try again.[/]")
 
         if filter_type_pattern is False:
             api_key = os.getenv("DeepSeek_key")
             if api_key is None:
-                console.print(f"[{ERR}]API key not found.[/] [{MUTED}]Add DeepSeek_key to the .env file and restart the application.[/]")
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]API key not found.[/] [{MUTED}]Add DeepSeek_key to the .env file and restart the application.[/]")
                 return
 
             df_subset = df.iloc[start_row:end_row]
             BATCH = 100
             total_batches = (len(df_subset) + BATCH - 1) // BATCH
 
-            console.print(Rule("Processing", style=ACCENT))
+            console.print(Rule(Text(" Processing ", style=ACCENT_BAR), style=ACCENT))
 
             row_track = start_row
 
             with Progress(
                 SpinnerColumn(style=ACCENT),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+                TextColumn(f"[bold {ACCENT}]{{task.description}}"),
+                BarColumn(bar_width=None, style="grey23", complete_style=OK,
+                          finished_style=OK, pulse_style=ACCENT),
                 MofNCompleteColumn(),
                 TextColumn(f"[{MUTED}]batches"),
                 TimeElapsedColumn(),
@@ -258,14 +255,15 @@ def show():
             df_subset = df.iloc[start_row:end_row]
             total_rows = len(df_subset)
 
-            console.print(Rule("Processing", style=ACCENT))
+            console.print(Rule(Text(" Processing ", style=ACCENT_BAR), style=ACCENT))
             row_track = start_row
             
 
             with Progress(
                 SpinnerColumn(style=ACCENT),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(bar_width=None, complete_style=ACCENT, finished_style=OK),
+                TextColumn(f"[bold {ACCENT}]{{task.description}}"),
+                BarColumn(bar_width=None, style="grey23", complete_style=OK,
+                          finished_style=OK, pulse_style=ACCENT),
                 MofNCompleteColumn(),
                 TextColumn(f"[{MUTED}]batches"),
                 TimeElapsedColumn(),

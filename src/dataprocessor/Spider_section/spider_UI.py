@@ -35,24 +35,12 @@ console = Console()
 
 # ---------------------------------------------------------------- theme ---
 
-ACCENT = "dark_orange"          # spider orange — the one loud color
-ACCENT_DIM = "dark_orange3"
-INK = "grey85"
-MUTED = "grey50"
-DANGER = "red3"
-WARN = "gold3"
-
-Q_STYLE = Style(
-    [
-        ("qmark", "fg:#ff8700 bold"),
-        ("question", "bold"),
-        ("answer", "fg:#ff8700 bold"),
-        ("pointer", "fg:#ff8700 bold"),
-        ("highlighted", "fg:#ff8700"),
-        ("selected", "fg:#ff8700"),
-        ("instruction", "fg:#666666"),
-    ]
+# One shared htop palette for every screen — see dataprocessor/theme.py.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_DIM, ACCENT_BAR, OK_BAR, PURPLE_BAR, GREEN_BAR, ERR_BAR, WARN_BAR, INK, MUTED, OK, WARN,
+    DANGER, CYAN, GREEN, RED, BLUE, PURPLE, chip, section,
 )
+from dataprocessor.theme import PROMPT_STYLE as Q_STYLE
 
 SOURCES = {
     "live": ("Current reports (PDF + page)", "BFS crawl of the live site"),
@@ -137,7 +125,7 @@ def banner() -> Panel:
     sub = Text("Nonprofit report crawler", style=MUTED, justify="center")
     return Panel(
         Group(Align.center(art), Align.center(sub)),
-        box=box.HEAVY,
+        box=box.SQUARE,
         border_style=ACCENT_DIM,
         subtitle=f"[{MUTED}]Spider[/]",
         padding=(0, 2),
@@ -145,7 +133,7 @@ def banner() -> Panel:
 
 
 def sources_table() -> Table:
-    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM,
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, header_style=f"bold {PURPLE_BAR}",
               title="Sources", title_style=f"bold {INK}", expand=True)
     t.add_column("ID", style=f"bold {ACCENT}", no_wrap=True)
     t.add_column("Retrieves", style=INK)
@@ -156,7 +144,7 @@ def sources_table() -> Table:
 
 
 def inputs_table() -> Table:
-    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, title="Required inputs", title_style=f"bold {INK}", expand=True)
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, header_style=f"bold {ACCENT_BAR}", title="Required inputs", title_style=f"bold {INK}", expand=True)
     t.add_column("Input", style=f"bold {INK}", no_wrap=True)
     t.add_column("Notes", style=MUTED)
     t.add_row("Org CSV", "Columns: name, domain, ein")
@@ -171,7 +159,7 @@ def intro():
     console.print(
         Panel(
             Columns([sources_table(), inputs_table()], equal=True, expand=True),
-            box=box.ROUNDED,
+            box=box.SQUARE,
             border_style=ACCENT_DIM,
             padding=(1, 2),
         )
@@ -200,7 +188,7 @@ def config_panel(cfg: dict, n_orgs: int) -> Panel:
         t,
         title=f"[bold {INK}]Run configuration[/]",
         border_style=ACCENT_DIM,
-        box=box.ROUNDED,
+        box=box.SQUARE,
         padding=(1, 2),
     )
 
@@ -250,7 +238,7 @@ def running_panel(cfg: dict, started: float, progress=None) -> Panel:
                  f"{done}{n} in range (rows {cfg['start_row']}\u2013{cfg['end_row']})")
     body.add_row("Sources", " \u00b7 ".join(cfg["sources"]))
     body.add_row("Elapsed", fmt_duration(time.monotonic() - started))
-    return Panel(body, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]Spider running[/]", padding=(1, 2))
+    return Panel(body, border_style=ACCENT, box=box.SQUARE, title=f"[{GREEN_BAR}] Spider running [/]", padding=(1, 2))
 
 
 def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
@@ -259,7 +247,7 @@ def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
             Text("No documents were found", style=f"bold {WARN}"),
             Text("Consider widening the year lookback or adding sources.", style=MUTED),
         )
-        return Panel(body, border_style=WARN, box=box.ROUNDED, title=f"[bold {WARN}]Finished \u2014 no results[/]", padding=(1, 2))
+        return Panel(body, border_style=WARN, box=box.SQUARE, title=f"[{WARN_BAR}] Finished \u2014 no results [/]", padding=(1, 2))
 
     lines = Table(box=None, show_header=False, pad_edge=False)
     lines.add_column(style=MUTED, justify="right", no_wrap=True)
@@ -283,7 +271,7 @@ def results_panel(manifest, cfg: dict, elapsed: float) -> Panel:
     except Exception:
         pass
 
-    return Panel(lines, border_style=ACCENT, box=box.ROUNDED, title=f"[bold {ACCENT}]Finished[/]", padding=(1, 2))
+    return Panel(lines, border_style=ACCENT, box=box.SQUARE, title=f"[{GREEN_BAR}] Finished [/]", padding=(1, 2))
 
 
 # ---------------------------------------------------------------- wizard ---
@@ -433,7 +421,7 @@ def show():
     # ---- interactive mode --------------------------------------------------
     intro()
     while True:
-        console.print(Rule(f"[bold {ACCENT}]New session[/]", style=ACCENT_DIM))
+        console.print(section("New session"))
 
         cfg = ask_config()
         if cfg is None:

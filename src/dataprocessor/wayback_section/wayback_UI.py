@@ -31,24 +31,12 @@ console = Console()
 
 # ---------------------------------------------------------------- theme ---
 
-ACCENT = "deep_sky_blue2"       # archive blue — deliberately not spider orange
-ACCENT_DIM = "deep_sky_blue4"
-INK = "grey85"
-MUTED = "grey50"
-DANGER = "red3"
-WARN = "gold3"
-
-Q_STYLE = Style(
-    [
-        ("qmark", "fg:#00afff bold"),
-        ("question", "bold"),
-        ("answer", "fg:#00afff bold"),
-        ("pointer", "fg:#00afff bold"),
-        ("highlighted", "fg:#00afff"),
-        ("selected", "fg:#00afff"),
-        ("instruction", "fg:#666666"),
-    ]
+# One shared htop palette for every screen — see dataprocessor/theme.py.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_DIM, ACCENT_BAR, OK_BAR, PURPLE_BAR, GREEN_BAR, ERR_BAR, WARN_BAR, INK, MUTED, OK, WARN,
+    DANGER, CYAN, GREEN, RED, BLUE, PURPLE, chip, section,
 )
+from dataprocessor.theme import PROMPT_STYLE as Q_STYLE
 
 # The rate the archive is swept at. 50/min is the default everywhere; the
 # wizard offers the two directions someone actually wants to move it in.
@@ -131,7 +119,7 @@ def banner() -> Panel:
     sub = Text("Internet Archive report collector", style=MUTED, justify="center")
     return Panel(
         Group(Align.center(art), Align.center(sub)),
-        box=box.HEAVY,
+        box=box.SQUARE,
         border_style=ACCENT_DIM,
         subtitle=f"[{MUTED}]Wayback[/]",
         padding=(0, 2),
@@ -139,7 +127,7 @@ def banner() -> Panel:
 
 
 def passes_table() -> Table:
-    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM,
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, header_style=f"bold {PURPLE_BAR}",
               title="What it sweeps (per org)", title_style=f"bold {INK}",
               expand=True)
     t.add_column("Pass", style=f"bold {ACCENT}", no_wrap=True)
@@ -151,7 +139,7 @@ def passes_table() -> Table:
 
 
 def inputs_table() -> Table:
-    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM,
+    t = Table(box=box.SIMPLE_HEAD, border_style=ACCENT_DIM, header_style=f"bold {ACCENT_BAR}",
               title="Required inputs", title_style=f"bold {INK}", expand=True)
     t.add_column("Input", style=f"bold {INK}", no_wrap=True)
     t.add_column("Notes", style=MUTED)
@@ -168,7 +156,7 @@ def intro():
     console.print(
         Panel(
             Columns([passes_table(), inputs_table()], equal=True, expand=True),
-            box=box.ROUNDED,
+            box=box.SQUARE,
             border_style=ACCENT_DIM,
             padding=(1, 2),
         )
@@ -204,7 +192,7 @@ def config_panel(cfg: dict, n_orgs: int) -> Panel:
         t,
         title=f"[bold {INK}]Run configuration[/]",
         border_style=ACCENT_DIM,
-        box=box.ROUNDED,
+        box=box.SQUARE,
         padding=(1, 2),
     )
 
@@ -269,8 +257,8 @@ def running_panel(cfg: dict, started: float, progress=None, limiter=None) -> Pan
     if limiter is not None:
         body.add_row("Archive rate", _rate_line(limiter))
     body.add_row("Elapsed", fmt_duration(time.monotonic() - started))
-    return Panel(body, border_style=ACCENT, box=box.ROUNDED,
-                 title=f"[bold {ACCENT}]Wayback running[/]", padding=(1, 2))
+    return Panel(body, border_style=ACCENT, box=box.SQUARE,
+                 title=f"[{GREEN_BAR}] Wayback running [/]", padding=(1, 2))
 
 
 def results_panel(manifest, cfg: dict, elapsed: float, limiter=None) -> Panel:
@@ -280,8 +268,8 @@ def results_panel(manifest, cfg: dict, elapsed: float, limiter=None) -> Panel:
             Text("Consider widening the year lookback, or enabling all formats.",
                  style=MUTED),
         )
-        return Panel(body, border_style=WARN, box=box.ROUNDED,
-                     title=f"[bold {WARN}]Finished — no results[/]", padding=(1, 2))
+        return Panel(body, border_style=WARN, box=box.SQUARE,
+                     title=f"[{WARN_BAR}] Finished — no results [/]", padding=(1, 2))
 
     lines = Table(box=None, show_header=False, pad_edge=False)
     lines.add_column(style=MUTED, justify="right", no_wrap=True)
@@ -309,8 +297,8 @@ def results_panel(manifest, cfg: dict, elapsed: float, limiter=None) -> Panel:
     except Exception:
         pass
 
-    return Panel(lines, border_style=ACCENT, box=box.ROUNDED,
-                 title=f"[bold {ACCENT}]Finished[/]", padding=(1, 2))
+    return Panel(lines, border_style=ACCENT, box=box.SQUARE,
+                 title=f"[{GREEN_BAR}] Finished [/]", padding=(1, 2))
 
 
 # ---------------------------------------------------------------- wizard ---
@@ -497,7 +485,7 @@ def show():
     # ---- interactive mode --------------------------------------------------
     intro()
     while True:
-        console.print(Rule(f"[bold {ACCENT}]New session[/]", style=ACCENT_DIM))
+        console.print(section("New session"))
 
         cfg = ask_config()
         if cfg is None:

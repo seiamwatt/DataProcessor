@@ -31,6 +31,14 @@ from dataprocessor.main_section import main_util
 import sys
 import importlib.metadata
 
+# THEME ---------------------------------------------------------------------------
+# One shared htop palette for every screen. Edit dataprocessor/theme.py to
+# retheme the whole application; nothing here defines its own colors.
+from dataprocessor.theme import (
+    ACCENT, ACCENT_DIM, ACCENT_BAR, OK_BAR, PURPLE_BAR, ERR_BAR, EMPHASIS, MUTED, OK, ERR,
+    CYAN, GREEN, RED, BLUE, PURPLE, chip, section,
+)
+# ---------------------------------------------------------------------------------
 # SETUP ---------------------------------------------------------------------------
 os.environ["TERM"] = "xterm-256color"
 def resource_path(relative_path):
@@ -49,31 +57,35 @@ console = Console()
 # ---------------------------------------------------------------------------------
 # UI ---------------------------------------------------------------------------
 def welcome_panel() -> Panel:
-    art = """[red]
+    art = f"""[{RED}]
  ████   █████  ██████  █████ 
  ██  ██ ██  ██   ██   ██  ██ 
  ██  ██ █████    ██   █████  
  ████   ██  ██   ██   ██  ██ 
-[blue]
+[{BLUE}]
  ████  ████   ████   ████  ████  █████  █████  ████  ████ 
  ██  █ ██  █ ██  ██ ██    ██    ██     ██     ██  ██ ██  █
  ████  ████  ██  ██ ██    ████   ███    ███  ██  ██ ████ 
  ██    ██  █  ████   ████  ████ █████  █████  ████  ██  █
 """
-    return Panel(art, subtitle=f"[blue]version: {version}", highlight=True)
+    return Panel(art, subtitle=f"[{MUTED}]version: {version}",
+                 border_style=ACCENT_DIM, box=box.SQUARE)
     
 def choice_menu():
     choice = questionary.select("Select terminal",choices = ["Part 1:Filter data","Part 2:LLM analysis","ALL"]).ask()
     return choice
 
 def info_panel() -> Panel:
-    return Panel(f"Version:{version}",title="Info",highlight=True)
+    return Panel(f"[{EMPHASIS}]Version: {version}[/]", title=chip("Info", PURPLE_BAR),
+                 title_align="left", border_style=ACCENT_DIM, box=box.SQUARE)
 
 def LLM_token_table():
-    table = Table(title = "LLM tokens rate",border_style="bright_cyan")
-    table.add_column("[blue]LLM",no_wrap=True)
-    table.add_column("[blue]Input (per 1M)",no_wrap=True)
-    table.add_column("[blue]Output (per 1M)",no_wrap=True)
+    table = Table(title="LLM tokens rate", title_style=f"bold {PURPLE}",
+                  title_justify="left", box=None, pad_edge=False, expand=True,
+                  header_style=f"bold {PURPLE_BAR}")
+    table.add_column("LLM", no_wrap=True, style=EMPHASIS)
+    table.add_column("INPUT (PER 1M)", no_wrap=True, style=BLUE)
+    table.add_column("OUTPUT (PER 1M)", no_wrap=True, style=PURPLE)
 
     table.add_row("DeepSeek","0.028 USD","0.42 USD")
     table.add_row("GPT 4.1 ","3 USD","0.75 USD")

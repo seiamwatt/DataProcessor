@@ -765,8 +765,10 @@ class ArchiveCollector:
         # fetch would add, so skip it -- that is the difference between two
         # requests per org and two plus one per report.
         if self.cfg.links_only:
-            self.storage.record_link(org=org["name"], source=SOURCE,
-                                     year=snap.year, url=snap.url, fmt=snap.fmt)
+            self.storage.record_link(org=org["name"],
+                                     domain=org.get("domain") or "",
+                                     source=SOURCE, year=snap.year,
+                                     url=snap.url, fmt=snap.fmt)
             return True
 
         resp = self.downloader.get(snap.url)
@@ -784,7 +786,9 @@ class ArchiveCollector:
             return False   # byte-identical to something already saved
         n_pages, text_len, ocr_used = self.parser.document_info(
             body, fmt, do_ocr=self.cfg.do_ocr)
-        self.storage.save_document(body, org=org["name"], source=SOURCE,
+        self.storage.save_document(body, org=org["name"],
+                                   domain=org.get("domain") or "",
+                                   source=SOURCE,
                                    year=snap.year, url=snap.url, fmt=fmt,
                                    n_pages=n_pages, text_len=text_len,
                                    ocr_used=ocr_used)
@@ -1002,8 +1006,8 @@ def main() -> None:
                        max_workers=args.workers)
     if df is not None:
         console.print(f"\n[green]Done. {len(df)} documents.[/green]")
-        cols = [c for c in ("org", "source", "format", "year", "pages",
-                            "saved_path", "url")
+        cols = [c for c in ("org", "domain", "source", "format", "year",
+                            "pages", "saved_path", "url")
                 if c in df.columns]
         console.print(df[cols].to_string(index=False))
 

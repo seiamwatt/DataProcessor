@@ -921,8 +921,9 @@ class ContentSeen:
 class ContentStorage:
     # Union of every field either row shape can produce, so the streamed CSV
     # has a stable header whether we're in links-only or download mode.
-    FIELDNAMES = ["org", "source", "format", "year", "url", "saved_path", "bytes",
-                  "pages", "text_len", "scanned_or_ocr", "sha256", "collected_at"]
+    FIELDNAMES = ["org", "domain", "source", "format", "year", "url",
+                  "saved_path", "bytes", "pages", "text_len", "scanned_or_ocr",
+                  "sha256", "collected_at"]
 
     def __init__(self, out_dir: str, manifest_name: str = "manifest.csv") -> None:
         self.out_dir = out_dir
@@ -997,18 +998,18 @@ class ContentStorage:
             log.warning("could not append to manifest %s: %s", self.manifest_csv, e)
 
     def record_link(self, *, org: str, source: str, year, url: str,
-                    fmt: str = "pdf") -> None:
+                    fmt: str = "pdf", domain: str = "") -> None:
         """Links-only mode: record the document's URL in the manifest without
         downloading the file. The row is streamed to disk immediately."""
         self._append_row({
-            "org": org, "source": source, "format": fmt,
+            "org": org, "domain": domain, "source": source, "format": fmt,
             "year": year if year else "undated", "url": url,
             "collected_at": dt.datetime.now().isoformat(timespec="seconds"),
         })
 
     def save_document(self, data: bytes, *, org: str, source: str, year,
                       url: str, fmt: str, n_pages: int = 1, text_len: int = 0,
-                      ocr_used: bool = False) -> str:
+                      ocr_used: bool = False, domain: str = "") -> str:
         """Save any collected document, named by its true format.
 
         The extension comes from the sniffed format, not the URL, so a report
@@ -1018,18 +1019,20 @@ class ContentStorage:
                                    url=url, fmt=fmt,
                                    ext=EXTENSION_FOR_FORMAT.get(fmt, ".bin"),
                                    n_pages=n_pages, text_len=text_len,
-                                   ocr_used=ocr_used)
+                                   ocr_used=ocr_used, domain=domain)
 
     def save_pdf(self, data: bytes, *, org: str, source: str, year, url: str,
-                 n_pages: int, text_len: int, ocr_used: bool) -> str:
+                 n_pages: int, text_len: int, ocr_used: bool,
+                 domain: str = "") -> str:
         """Back-compat shim for callers that predate save_document."""
         return self.save_document(data, org=org, source=source, year=year,
                                   url=url, fmt="pdf", n_pages=n_pages,
-                                  text_len=text_len, ocr_used=ocr_used)
+                                  text_len=text_len, ocr_used=ocr_used,
+                                  domain=domain)
 
     def _save_document(self, data: bytes, *, org: str, source: str, year,
                        url: str, fmt: str, ext: str, n_pages: int,
-                       text_len: int, ocr_used: bool) -> str:
+                       text_len: int, ocr_used: bool, domain: str = "") -> str:
         year = year if year else "undated"
         folder = os.path.join(self.out_dir, slugify(org), source, str(year))
         os.makedirs(folder, exist_ok=True)
@@ -1056,8 +1059,8 @@ class ContentStorage:
             f.write(data)
 
         self._append_row({
-            "org": org, "source": source, "format": fmt, "year": year,
-            "url": url, "saved_path": path, "bytes": len(data),
+            "org": org, "domain": domain, "source": source, "format": fmt,
+            "year": year, "url": url, "saved_path": path, "bytes": len(data),
             "pages": n_pages, "text_len": text_len, "scanned_or_ocr": ocr_used,
             "sha256": ContentSeen.digest(data),
             "collected_at": dt.datetime.now().isoformat(timespec="seconds"),
@@ -1198,6 +1201,7 @@ class Crawler:
         self.storage = storage if storage is not None else ContentStorage(cfg.output_dir)
         self.extractor = URLExtractor()
         self._filters: dict[str, URLFilter] = {}   # org -> live-crawl filter
+        self._domains: dict[str, str] = {}        # org -> seeded domain
 
     # ---- per-org seeding ---------------------------------------------------
     def seed_org(self, org: dict) -> None:
@@ -1212,6 +1216,7 @@ class Crawler:
         self._filters[org["name"]] = URLFilter(org["domain"], self.cfg.all_pdfs,
                                                org.get("name"),
                                                self.cfg.html_reports)
+        self._domains[org["name"]] = org["domain"]
         self.frontier.add(WorkItem(f"https://{org['domain']}/", source="live",
                                    org=org["name"], depth=0, expand=True))
 
@@ -1252,8 +1257,9 @@ class Crawler:
         # an HTML report is ALSO an ordinary page, so if it was queued for
         # expansion we keep crawling it after recording it.
         if self.cfg.links_only and item.collect:
-            self.storage.record_link(org=item.org, source=item.source,
-                                     year=item.year, url=url, fmt=item.fmt)
+            self.storage.record_link(org=item.org, domain=self._domain(item),
+                                     source=item.source, year=item.year,
+                                     url=url, fmt=item.fmt)
             if not item.expand:
                 return
 
@@ -1289,7 +1295,9 @@ class Crawler:
                 # A URL that turned out to be a document -- unless `collect`
                 # already put it in the manifest above.
                 if not item.collect:
-                    self.storage.record_link(org=item.org, source=item.source,
+                    self.storage.record_link(org=item.org,
+                                             domain=self._domain(item),
+                                             source=item.source,
                                              year=item.year, url=item.url,
                                              fmt=fmt)
             else:
@@ -1307,12 +1315,19 @@ class Crawler:
             self._expand_html(item, resp)
 
     # ---- handlers --------------------------------------------------------------
+    def _domain(self, item: WorkItem) -> str:
+        """The org's seeded domain. Falls back to the item's own host, which is
+        what a redirect off the seed domain leaves us with."""
+        return self._domains.get(item.org) or urlparse(item.url).netloc.lower()
+
     def _handle_document(self, item: WorkItem, body: bytes, fmt: str) -> None:
         if not self.content_seen.is_new(body):
             return   # identical file already saved under another URL
         n_pages, text_len, ocr_used = self.parser.document_info(
             body, fmt, do_ocr=self.cfg.do_ocr)
-        self.storage.save_document(body, org=item.org, source=item.source,
+        self.storage.save_document(body, org=item.org,
+                                   domain=self._domain(item),
+                                   source=item.source,
                                    year=item.year, url=item.url, fmt=fmt,
                                    n_pages=n_pages, text_len=text_len,
                                    ocr_used=ocr_used)
@@ -1682,8 +1697,8 @@ def main() -> None:
     df = run_lanes(cfg, with_domain, cfg.max_workers)
     if df is not None:
         console.print(f"\n[green]Done. {len(df)} documents.[/green]")
-        cols = [c for c in ("org", "source", "format", "year", "pages",
-                            "saved_path", "url")
+        cols = [c for c in ("org", "domain", "source", "format", "year",
+                            "pages", "saved_path", "url")
                 if c in df.columns]
         console.print(df[cols].to_string(index=False))
 

@@ -919,11 +919,9 @@ class ContentSeen:
 # Content storage -- dated folders per org/source + a pandas manifest
 # ===========================================================================
 class ContentStorage:
-    # Union of every field either row shape can produce, so the streamed CSV
-    # has a stable header whether we're in links-only or download mode.
-    FIELDNAMES = ["org", "domain", "source", "format", "year", "url",
-                  "saved_path", "bytes", "pages", "text_len", "scanned_or_ocr",
-                  "sha256", "collected_at"]
+    # The only columns the manifest keeps, in both links-only and download
+    # mode; any other keys a row carries are dropped on write.
+    FIELDNAMES = ["org", "source", "year", "url", "domain"]
 
     def __init__(self, out_dir: str, manifest_name: str = "manifest.csv") -> None:
         self.out_dir = out_dir
@@ -1697,10 +1695,7 @@ def main() -> None:
     df = run_lanes(cfg, with_domain, cfg.max_workers)
     if df is not None:
         console.print(f"\n[green]Done. {len(df)} documents.[/green]")
-        cols = [c for c in ("org", "domain", "source", "format", "year",
-                            "pages", "saved_path", "url")
-                if c in df.columns]
-        console.print(df[cols].to_string(index=False))
+        console.print(df[ContentStorage.FIELDNAMES].to_string(index=False))
 
 
 if __name__ == "__main__":

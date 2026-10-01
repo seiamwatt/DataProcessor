@@ -1006,10 +1006,7 @@ def main() -> None:
                        max_workers=args.workers)
     if df is not None:
         console.print(f"\n[green]Done. {len(df)} documents.[/green]")
-        cols = [c for c in ("org", "domain", "source", "format", "year",
-                            "pages", "saved_path", "url")
-                if c in df.columns]
-        console.print(df[cols].to_string(index=False))
+        console.print(df[ContentStorage.FIELDNAMES].to_string(index=False))
 
 
 if __name__ == "__main__":

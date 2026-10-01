@@ -38,10 +38,12 @@ WAYBACK_SECTION = "Wayback Section"
 
 
 FILTER_PAGE = "Filter data"
-LLM_ANALYSIS_URL = "LLM Analysis - url"
-LLM_ANALYSIS_PDF = "LLM Analysis - pdf"
-LLM_ANALYSIS_URL_V2 = "LLM Analysis - url"
-LLM_ANALYSIS_PDF_V2 = "LLM Analysis - pdf"
+
+
+# LLM_ANALYSIS_URL = "LLM Analysis - url"
+# LLM_ANALYSIS_PDF = "LLM Analysis - pdf"
+# LLM_ANALYSIS_URL_V2 = "LLM Analysis - url"
+# LLM_ANALYSIS_PDF_V2 = "LLM Analysis - pdf"
 PROPUBLICA_ORG_FINDER = "Probulica API ORG Finder"
 PROPUBLICA_DOMAIN_FINDER = "Propublica domain finder"
 SPIDER_V1 = "Spider v1"

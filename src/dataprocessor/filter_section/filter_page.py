@@ -39,6 +39,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 from dataprocessor.filter_section import report_filter_llm
 from dataprocessor.filter_section import report_filter_pattern
+from dataprocessor.Spider_section.spider import ContentStorage
+
+# Same columns as the spider/wayback manifests, plus the classifier's verdict.
+OUTPUT_COLUMNS = ContentStorage.FIELDNAMES + ["is_annual_report"]
 
 console = Console()
 os.environ["TERM"] = "xterm-256color"
@@ -169,7 +173,7 @@ def show():
                 # batch_size = questionary.text("Batch size", style=PROMPT_STYLE).ask()
                 start_row = questionary.text("Start row", default=str(0), style=PROMPT_STYLE).ask()
                 end_row = questionary.text("End row", default=str(default_end_row), style=PROMPT_STYLE).ask()
-                col_name = questionary.text("Column name", default="pdf_url", style=PROMPT_STYLE).ask()
+                col_name = questionary.text("Column name", default="url", style=PROMPT_STYLE).ask()
                 output_path = os.path.join(os.path.dirname(input_path), output_path)
 
                 start_row = int(start_row)
@@ -229,6 +233,7 @@ def show():
 
                     batch_result = pd.DataFrame(rows)
                     batch_result["is_annual_report"] = batch_result["is_annual_report"].astype("Int64")
+                    batch_result = batch_result.reindex(columns=OUTPUT_COLUMNS)
 
                     if os.path.exists(output_path):
                         write_header = False
@@ -294,6 +299,7 @@ def show():
 
                     batch_result = pd.DataFrame(rows)
                     batch_result["is_annual_report"] = batch_result["is_annual_report"].astype("Int64")
+                    batch_result = batch_result.reindex(columns=OUTPUT_COLUMNS)
 
                     if os.path.exists(output_path):
                         write_header = False

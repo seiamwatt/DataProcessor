@@ -127,7 +127,7 @@ def show():
                 start_row = questionary.text("Start row", default=str(0), style=PROMPT_STYLE).ask()
                 end_row = questionary.text("End row", default=str(default_end_row), style=PROMPT_STYLE).ask()
                 col_name = questionary.text("URL col name", default="url", style=PROMPT_STYLE).ask()
-                batch_size = questionary.text("Batch size", default=str(200), style=PROMPT_STYLE).ask()
+                batch_size = questionary.text("Batch size", default=str(5), style=PROMPT_STYLE).ask()
 
                 output_path = os.path.join(os.path.dirname(input_path), clean_path(output_path))
 

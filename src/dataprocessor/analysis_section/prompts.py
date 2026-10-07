@@ -1,3 +1,4 @@
+import json
 
 def construct_system_prompt(extracted_text):
 
@@ -176,9 +177,25 @@ def construct_system_prompt(extracted_text):
     OVERALL_IntensityE: Quote or concise evidence with locator.
     --- END CODEBOOK ---"""
 
-    json_schema = """OUTPUT FORMAT:
+    json_schema = f"""OUTPUT FORMAT:
     You must output a JSON object with EXACTLY these 91 keys and types:
-    {
+    {OUTPUT_SCHEMA}"""
+
+    # count tokens containing at least one letter, 999 if no text was extracted
+    word_count = 999
+    if extracted_text:
+        word_count = sum(1 for token in extracted_text.split() if any(c.isalpha() for c in token))
+
+    report = f"""COMPUTED_REPORT_WORD_COUNT: {word_count}
+
+    --- START REPORT ---
+    {extracted_text}
+    --- END REPORT ---"""
+
+    return f"{preamble}\n\n{warning}\n\n{logic_gates}\n\n{codebook}\n\n{json_schema}\n\n{report}"
+
+
+OUTPUT_SCHEMA = """{
       "META_WordCount": "integer",
       "META_PrimaryActivity": "string",
       "META_Revenue_AR": "string",
@@ -271,5 +288,6 @@ def construct_system_prompt(extracted_text):
       "OVERALL_Intensity": "integer",
       "OVERALL_IntensityE": "string"
     }"""
-    
-    return f"{preamble}\n\n{warning}\n\n{logic_gates}\n\n{codebook}\n\n{json_schema}"
+
+# output csv analysis columns, in schema order
+ANALYSIS_COLUMNS = list(json.loads(OUTPUT_SCHEMA))

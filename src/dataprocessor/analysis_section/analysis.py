@@ -11,20 +11,29 @@ import os
 import ocrmypdf
 import tempfile
 from rich.console import Console
-import sys, os
+import sys
+from concurrent.futures import ThreadPoolExecutor
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 console = Console()
-from analysis_section import prompts
+from dataprocessor.analysis_section import prompts
 
 # LLM calls 
 from openai import OpenAI
+# load openai submodules now, lazy loading from many threads at once deadlocks
+import openai.resources
 from google import genai
 from google.genai import types
 
+# keys
+load_dotenv()
+DEEPSEEK_KEY = os.getenv("DeepSeek_key")
+GEMINI_KEY = os.getenv("Gemini_key")
+GPT_KEY = os.getenv("GPT_key")
+
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = ""
-GEMINI_MODEL = ""
-GPT_MODEL = ""
+DEEPSEEK_MODEL = "deepseek-v4-pro"
+GEMINI_MODEL = "gemini-3.8-flash"
+GPT_MODEL = "gpt-6-luna"
 
 def load_csv(file_path):
     try:
@@ -67,25 +76,46 @@ def extract_pdf_text(pdf_url):
                 tmp.write(response.content)
                 tmp_path = tmp.name
 
-            IMG_to_pdf(tmp_path)
-            pdf_reader = PyPDF2.PdfReader(tmp_path)
+            try:
+                IMG_to_pdf(tmp_path)
+                pdf_reader = PyPDF2.PdfReader(tmp_path)
+                text = ""
+                for page in range(len(pdf_reader.pages)):
+                    text += pdf_reader.pages[page].extract_text() or ""
+            finally:
+                os.remove(tmp_path)
+        else:
+            text = ""
+            for page in range(len(pdf_reader.pages)):
+                text += pdf_reader.pages[page].extract_text() or ""
 
-        text = ""
-        num_pages = pdf_reader.pages
-
-        for page in range(num_pages):
-            text += pdf_reader.pages[page].extract_text() or ""
         # edit amount of text extracted here
         return text[:2000]
-
     except Exception as e:
         print(f"error processing pdf: {e}")
         return None
 
-def connect_deepseek(prompt,api_key):
+# reports -> 2 dimensional [[extracted_text,prompt]]
+# prompt is None when no text could be extracted, those reports are skipped
+
+def create_reports_batch(url_links):
+    reports = []
+    for url in url_links:
+        extracted_text = extract_pdf_text(url)
+        if not extracted_text:
+            print(f"skipping {url}: no text extracted")
+            reports.append([extracted_text,None])
+            continue
+        prompt = [{"role": "user", "content": prompts.construct_system_prompt(extracted_text)}]
+        reports.append([extracted_text,prompt])
+    return reports
+
+
+# NOTE: DEEPSEEK
+def connect_deepseek_helper(prompt,api_key):
     client = OpenAI(
         api_key=api_key,
-        base_url="https://api.deepseek.com"
+        base_url=DEEPSEEK_BASE_URL
     )
     response = client.chat.completions.create(
         model = DEEPSEEK_MODEL,
@@ -97,46 +127,149 @@ def connect_deepseek(prompt,api_key):
 
     return json.loads(response.choices[0].message.content)
 
-def connect_gemini(prompt,api_key):
+
+def deepseek_batch(reports,api_key):
+    MAX_WORKERS = 50
+    futures = []
+    result_rows = []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        for i in range(len(reports)):
+            if reports[i][1] is None:
+                futures.append(None)
+                continue
+            future = executor.submit(connect_deepseek_helper,reports[i][1],api_key)
+            futures.append(future)
+
+    for i in range(len(reports)):
+        if futures[i] is None:
+            result_rows.append(None)
+            continue
+        try:
+            row = futures[i].result()
+        except Exception as e:
+            print(f"error processing report {i}: {e}")
+            row = None
+        result_rows.append(row)
+
+    return result_rows
+
+
+#  NOTE: Gemini
+def gemini_batch_submit(reports,api_key):
     client = genai.Client(api_key=api_key)
-    response = client.interactions.create(
-        model = GEMINI_MODEL,
-        input = prompt,
-        response_mime_type="application/json",
-    )
 
-    return json.loads(response.outputs[-1].text)
+    with tempfile.NamedTemporaryFile(mode = "w",suffix=".jsonl",delete=False) as tmp:
+        for i in range(len(reports)):
+            if reports[i][1] is None:
+                continue
+            prompt = reports[i][1][0]["content"]
+            request = {
+                "key": str(i),
+                "request": {
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generation_config": {"response_mime_type": "application/json"}
+                }
+            }
+            tmp.write(json.dumps(request) + "\n")
+        tmp_path = tmp.name
 
-def connect_gpt(prompt,api_key):
+    try:
+        uploaded = client.files.upload(
+            file=tmp_path,
+            config=types.UploadFileConfig(display_name="report-batch",mime_type="jsonl")
+        )
+        job = client.batches.create(
+            model=GEMINI_MODEL,
+            src=uploaded.name,
+            config={"display_name": "report-batch"}
+        )
+
+    finally:
+        os.remove(tmp_path)
+
+    return job.name
+
+def gemini_batch(job_name,api_key,num_reports):
+    client = genai.Client(api_key = api_key)
+    job = client.batches.get(name =job_name)
+    result_rows = [None] * num_reports
+
+    # None means still running, terminal failures raise so callers stop polling
+    if job.state.name in ("JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED"):
+        raise RuntimeError(f"gemini batch {job_name} ended with {job.state.name}")
+    if job.state.name != "JOB_STATE_SUCCEEDED":
+        return None
+
+    lines = client.files.download(file=job.dest.file_name).decode("utf-8").splitlines()
+
+    for line in lines:
+        row = json.loads(line)
+        i = int(row["key"])
+        try:
+            text = row["response"]["candidates"][0]["content"]["parts"][0]["text"]
+            result_rows[i] = json.loads(text)
+        except Exception as e:
+            print(f"error processing report {i}: {e}")
+
+    return result_rows
+
+# NOTE: GPT
+
+def gpt_batch_submit(reports,api_key):
     client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=GPT_MODEL,
-        messages=prompt,
-        response_format={"type":"json_object"}
-    )
-    return json.loads(response.choices[0].message.content)
 
+    with tempfile.NamedTemporaryFile(mode="w",suffix=".jsonl",delete=False) as tmp:
+        for i in range(len(reports)):
+            if reports[i][1] is None:
+                continue
+            request = {
+                "custom_id": str(i),
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": GPT_MODEL,
+                    "messages": reports[i][1],
+                    "response_format": {"type": "json_object"}
+                }
+            }
+            tmp.write(json.dumps(request) + "\n")
 
-def process_report(extracted_text,api_key):
-    system_prompt = prompts.construct_system_prompt()
-    user_prompt = prompts.construct_user_prompt(extracted_text)
+        tmp_path = tmp.name
 
-    # deepseek and gpt take a message list, gemini interactions takes a single string
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
-    gemini_prompt = f"{system_prompt}\n\n{user_prompt}"
+    try:
+        with open(tmp_path,"rb") as f:
+            batch_file = client.files.create(file=f,purpose="batch")
 
-    deepseek_response = connect_deepseek(messages,api_key)
-    gemini_response = connect_gemini(gemini_prompt,api_key)
-    gpt_response = connect_gpt(messages,api_key)
+        batch = client.batches.create(
+            input_file_id = batch_file.id,
+            endpoint = "/v1/chat/completions",
+            completion_window="24h"
+        )
+            
+    finally:
+        os.remove(tmp_path)
 
-    return {
-        "deepseek_response": deepseek_response,
-        "gemini_response": gemini_response,
-        "gpt_response": gpt_response
-    }
+    return batch.id
 
-
-
+def gpt_batch(api_key,batch_id,num_reports):
+    client = OpenAI(api_key=api_key)
+    batch = client.batches.retrieve(batch_id)
+    result_rows = [None] * num_reports
+    
+    # None means still running, terminal failures raise so callers stop polling
+    if batch.status in ("failed", "expired", "cancelling", "cancelled"):
+        raise RuntimeError(f"gpt batch {batch_id} ended with {batch.status}")
+    if batch.status != "completed":
+        return None
+    
+    lines = client.files.content(batch.output_file_id).text.splitlines()
+    for line in lines:
+        row = json.loads(line)
+        i = int(row["custom_id"])
+        try:
+            content = row["response"]["body"]["choices"][0]["message"]["content"]
+            result_rows[i] = json.loads(content)
+        except Exception as e:
+            print(f"error processing report {i}: {e}")
+    return result_rows

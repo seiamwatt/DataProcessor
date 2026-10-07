@@ -15,6 +15,8 @@ from dataprocessor.propublica_section import propublica_UI
 from dataprocessor.propublica_domain_finder_section import domain_finder_UI
 from dataprocessor.Spider_section import spider_UI
 from dataprocessor.wayback_section import wayback_UI
+from dataprocessor.analysis_section import analysis_ui
+from dataprocessor.links_checker_section import links_checker_UI
 # SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
@@ -40,7 +42,9 @@ PROPUBLICA_ORG_FINDER = "Probulica API ORG Finder"
 PROPUBLICA_DOMAIN_FINDER = "Propublica domain finder"
 SPIDER_V1 = "Spider v1"
 SPIDER_V2 = "Spider v2"
+LINK_CHECKER = "Link Checker"
 SETTINGS = "Settings"
+
 
 
 
@@ -48,14 +52,14 @@ def main():
     
 
     main_page.show()
-    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,WAYBACK_SECTION,SETTINGS]).ask()
+    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,WAYBACK_SECTION,LINK_CHECKER,SETTINGS]).ask()
     
     if choice == FILTER_PAGE:
         filter_page.show()
     elif choice == ANALYSIS_SECTION:
         choice = questionary.select("Select version", choices = [LLM_ANALYSIS]).ask()
-        # TODO : add options 
-        pass 
+        if choice == LLM_ANALYSIS:
+            analysis_ui.show()
     elif choice == PROPUBLICA_SECTION:
         choice = questionary.select("Select tool", choices= [PROPUBLICA_ORG_FINDER,PROPUBLICA_DOMAIN_FINDER]).ask()
         if choice == PROPUBLICA_ORG_FINDER:
@@ -70,10 +74,10 @@ def main():
             pass
     elif choice == WAYBACK_SECTION:
         wayback_UI.show()
+    elif choice == LINK_CHECKER:
+        links_checker_UI.show()
     elif choice == SETTINGS:
         settings_page.show()
-
-
 
 if __name__ == "__main__":
     main()

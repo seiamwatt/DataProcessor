@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(.venv/bin/python -c \"from dataprocessor.analysis_section import analysis_ui; print\\('ok'\\)\")",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

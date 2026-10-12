@@ -123,7 +123,6 @@ MODEL_PREFIXES = {"deepseek": "ds", "gemini": "gm", "gpt": "gpt"}
 OUTPUT_COLUMNS = ID_COLUMNS + ["url"] + [
     f"{prefix}_{col}" for prefix in MODEL_PREFIXES.values() for col in prompts.ANALYSIS_COLUMNS
 ]
-POLL_SECONDS = 60
 RETRIES = 3
 RETRY_SECONDS = 10
 
@@ -153,11 +152,11 @@ def gemini_run(reports,api_key):
         return [None] * len(reports)
 
     job_name = with_retry(analysis.gemini_batch_submit,reports,api_key)
-    while True:
-        result_rows = with_retry(analysis.gemini_batch,job_name,api_key,len(reports))
-        if result_rows is not None:
-            return result_rows
-        time.sleep(POLL_SECONDS)
+    analysis.wait_gemini(job_name,api_key)
+    result_rows = with_retry(analysis.gemini_batch,job_name,api_key,len(reports))
+    if result_rows is None:
+        raise RuntimeError(f"gemini batch {job_name} still running after wait")
+    return result_rows
 
 
 def gpt_run(reports,api_key):
@@ -165,11 +164,11 @@ def gpt_run(reports,api_key):
         return [None] * len(reports)
 
     batch_id = with_retry(analysis.gpt_batch_submit,reports,api_key)
-    while True:
-        result_rows = with_retry(analysis.gpt_batch,api_key,batch_id,len(reports))
-        if result_rows is not None:
-            return result_rows
-        time.sleep(POLL_SECONDS)
+    analysis.wait_gpt(batch_id,api_key)
+    result_rows = with_retry(analysis.gpt_batch,api_key,batch_id,len(reports))
+    if result_rows is None:
+        raise RuntimeError(f"gpt batch {batch_id} still running after wait")
+    return result_rows
 
 
 # a failed model leaves its columns empty instead of stopping the run

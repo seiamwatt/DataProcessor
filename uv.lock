@@ -332,7 +332,9 @@ source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "boto3" },
+    { name = "botocore" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "ocrmypdf" },
     { name = "openai" },
     { name = "openpyxl" },
@@ -346,14 +348,18 @@ dependencies = [
     { name = "rapidfuzz" },
     { name = "requests" },
     { name = "rich" },
+    { name = "tenacity" },
     { name = "tqdm" },
+    { name = "urllib3" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4" },
     { name = "boto3" },
+    { name = "botocore", specifier = ">=1.43.46" },
     { name = "google-genai" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "ocrmypdf" },
     { name = "openai" },
     { name = "openpyxl", specifier = ">=3.1.5" },
@@ -367,7 +373,9 @@ requires-dist = [
     { name = "rapidfuzz" },
     { name = "requests" },
     { name = "rich" },
+    { name = "tenacity", specifier = ">=9.1.4" },
     { name = "tqdm" },
+    { name = "urllib3", specifier = ">=2.7.0" },
 ]
 
 [[package]]

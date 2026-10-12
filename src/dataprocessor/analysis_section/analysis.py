@@ -16,6 +16,13 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 console = Console()
 from dataprocessor.analysis_section import prompts
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    retry_if_result,
+    stop_after_delay,
+    wait_exponential,
+)
 
 # LLM calls 
 from openai import OpenAI
@@ -34,6 +41,8 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-v4-pro"
 GEMINI_MODEL = "gemini-3.8-flash"
 GPT_MODEL = "gpt-6-luna"
+
+# NOTE: HELPERS FUNCTIONS
 
 def load_csv(file_path):
     try:
@@ -109,6 +118,43 @@ def create_reports_batch(url_links):
         prompt = [{"role": "user", "content": prompts.construct_system_prompt(extracted_text)}]
         reports.append([extracted_text,prompt])
     return reports
+
+
+def processing_status_gemini(job):
+    invalid_status = ["JOB_STATE_SUCCEEDED","JOB_STATE_FAILED","JOB_STATE_CANCELLED","JOB_STATE_EXPIRED"]
+    if job.state.name not in invalid_status:
+        return True
+    return False
+
+def processing_status_gpt(batch):
+    invalid_status = ["completed", "failed", "expired", "cancelled"]
+    if batch.status not in invalid_status:
+        return True 
+    return False
+
+
+# keeps polling through dropped connections and server errors, other errors stop right away
+@retry(
+    retry=retry_if_result(processing_status_gemini) | retry_if_exception_type(genai.errors.ServerError),
+    wait=wait_exponential(multiplier=2,min=10,max=300),
+    stop=stop_after_delay(24 * 60 * 60)
+)
+def wait_gemini(job_name,api_key):
+    client = genai.Client(api_key=api_key)
+    return client.batches.get(name=job_name)
+
+@retry(
+    retry=retry_if_result(processing_status_gpt) | retry_if_exception_type((
+        openai.APIConnectionError,
+        openai.RateLimitError,
+        openai.InternalServerError,
+    )),
+    wait=wait_exponential(multiplier=2,min=10,max=300),
+    stop=stop_after_delay(24 * 60 * 60)
+)
+def wait_gpt(batch_id,api_key):
+    client = OpenAI(api_key=api_key)
+    return client.batches.retrieve(batch_id)
 
 
 # NOTE: DEEPSEEK

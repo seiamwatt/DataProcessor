@@ -1,6 +1,6 @@
 # AWS
 boto3
-botocore
+botocore>=1.43.46
 
 # Environment / config
 python-dotenv
@@ -11,13 +11,23 @@ openai
 
 # Data processing
 pandas
+pandas-gbq
+rapidfuzz
+openpyxl>=3.1.5
 
 # PDF / OCR
 ocrmypdf
 PyPDF2
+pypdf
 
-# HTTP
+# HTTP / scraping
 requests
+httpx>=0.28.1
+urllib3>=2.7.0
+beautifulsoup4
+
+# Retry / rate limiting
+tenacity>=9.1.4
 
 # CLI / UI
 rich

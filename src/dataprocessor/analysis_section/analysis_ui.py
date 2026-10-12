@@ -118,7 +118,11 @@ def run_summary_panel(id,start_row,end_row,time_elapsed,output_path) -> Panel:
 
 
 ID_COLUMNS = ["org", "ein", "domain", "year"]
-OUTPUT_COLUMNS = ID_COLUMNS + ["url", "model"] + prompts.ANALYSIS_COLUMNS
+# column prefix per model, each model gets its own block of analysis columns
+MODEL_PREFIXES = {"deepseek": "ds", "gemini": "gm", "gpt": "gpt"}
+OUTPUT_COLUMNS = ID_COLUMNS + ["url"] + [
+    f"{prefix}_{col}" for prefix in MODEL_PREFIXES.values() for col in prompts.ANALYSIS_COLUMNS
+]
 POLL_SECONDS = 60
 RETRIES = 3
 RETRY_SECONDS = 10
@@ -270,24 +274,24 @@ def show():
                     "gpt": result_gpt
                 }
 
-                # one output row per report per model
+                # one output row per report, models side by side as prefixed columns
                 for j in range(len(batch)):
                     source_row = batch.iloc[j]
 
-                    for model, result_rows in model_results.items():
-                        result_row = {}
-                        for col in ID_COLUMNS:
-                            result_row[col] = source_row.get(col, "")
-                        result_row["url"] = source_row[col_name]
-                        result_row["model"] = model
+                    result_row = {}
+                    for col in ID_COLUMNS:
+                        result_row[col] = source_row.get(col, "")
+                    result_row["url"] = source_row[col_name]
 
+                    for model, result_rows in model_results.items():
+                        prefix = MODEL_PREFIXES[model]
                         result = result_rows[j]
                         if not isinstance(result, dict):
                             result = {}
                         for col in prompts.ANALYSIS_COLUMNS:
-                            result_row[col] = result.get(col)
+                            result_row[f"{prefix}_{col}"] = result.get(col)
 
-                        rows.append(result_row)
+                    rows.append(result_row)
 
                 ok_counts = []
                 for model, result_rows in model_results.items():

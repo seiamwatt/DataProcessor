@@ -56,7 +56,7 @@ def need_ocr(pdf_reader) -> bool:
 def IMG_to_pdf(file_path):
 
     output_path = file_path
-    ocrmypdf.ocr(file_path, output_path, deskew=True)
+    ocrmypdf.ocr(file_path, output_path, deskew=True,skip_text=True)
 
     return output_path
 
@@ -90,7 +90,7 @@ def extract_pdf_text(pdf_url):
                 text += pdf_reader.pages[page].extract_text() or ""
 
         # edit amount of text extracted here
-        return text[:2000]
+        return text
     except Exception as e:
         print(f"error processing pdf: {e}")
         return None

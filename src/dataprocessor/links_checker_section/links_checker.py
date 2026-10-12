@@ -23,7 +23,6 @@ def check_dead_live(url) -> bool:
         # some servers reject HEAD, retry with GET
         if response.status_code in (403,405,429):
             response = httpx.get(url,follow_redirects=True,timeout=5)
-
         return response.status_code >= 400
 
     except httpx.HTTPError:

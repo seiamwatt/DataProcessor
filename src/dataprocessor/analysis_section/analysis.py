@@ -139,6 +139,7 @@ def processing_status_gpt(batch):
     wait=wait_exponential(multiplier=2,min=10,max=300),
     stop=stop_after_delay(24 * 60 * 60)
 )
+
 def wait_gemini(job_name,api_key):
     client = genai.Client(api_key=api_key)
     return client.batches.get(name=job_name)
@@ -170,7 +171,6 @@ def connect_deepseek_helper(prompt,api_key):
         reasoning_effort="high",
         response_format={"type": "json_object"}
     )
-
     return json.loads(response.choices[0].message.content)
 
 

@@ -35,10 +35,12 @@ dependencies = [
     "questionary",
     # Date / time
     "pytz",
+    "pywebview>=6.2.1",
 ]
 
 [project.scripts]
 dataprocessor = "dataprocessor.main:main"
+dataprocessor-gui = "dataprocessor.gui.app:main"
 
 [build-system]
 requires = ["hatchling"]

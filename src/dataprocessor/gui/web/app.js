@@ -167,10 +167,25 @@ const TOOLS = {
       r.status === 'dead' ? ['DEAD', 't-err t-bold'] : r.status === 'live' ? ['live', 't-ok'] : ['?', 't-warn t-bold'],
       [r.source, r.source === 'wayback' ? 't-blue' : 't-cyan'], secsCell(r.secs), [r.org, 't-br'], [r.url, '']],
   },
+
+  summary: {
+    tab: 'Summary',
+    title: 'Summary – org × year matrix',
+    blurb: 'One row per org, 1/0 per year it has a report, with years covered and longest consecutive streak.',
+    unit: 'orgs',
+    fields: [
+      { key: 'input', label: 'Input CSV', type: 'csv', required: true, hint: "Dated reports, needs 'org', 'domain' and 'year' columns" },
+      { key: 'output', label: 'Output CSV', type: 'save', def: '', ph: '<input>_matrix.csv', hint: 'Blank = <input>_matrix.csv · also writes <name>_stats.csv · overwrites' },
+    ],
+    cols: [{ h: 'NAME', w: '1fr' }, { h: 'DOMAIN', w: 'minmax(14ch, 28ch)' }, { h: 'YEARS', w: '7ch', r: 1 }, { h: 'STREAK', w: '8ch', r: 1 }, { h: 'SPAN', w: '11ch' }],
+    row: (r) => r.total
+      ? [['Yrly Sum · unique years', 't-warn t-bold'], ['', ''], [r.years, 't-warn t-bold'], [r.streak, 't-warn t-bold'], [r.span, 't-cyan']]
+      : [[r.name, 't-br'], [r.domain, 't-dim'], [r.years, 't-ok t-bold'], [r.streak, 't-mag'], [r.span, 't-cyan']],
+  },
 };
 
 // Columns a tool can't run without, checked as soon as the input CSV is picked.
-const REQUIRED_COLS = { spider: ['domain'], wayback: ['domain'], links: ['source'] };
+const REQUIRED_COLS = { spider: ['domain'], wayback: ['domain'], links: ['source'], summary: ['org', 'domain'] };
 
 const TABS = [['main', 'Main'], ...Object.entries(TOOLS).map(([k, t]) => [k, t.tab]), ['settings', 'Setup']];
 const KEY_LABEL = { DeepSeek_key: 'DS', GPT_key: 'GPT', Gemini_key: 'GEM' };
@@ -340,7 +355,7 @@ function fieldCell(tool, f) {
 function fieldHint(tool, f) {
   const meta = S.meta[tool];
   const v = val(tool, f);
-  if (f.type === 'csv') {
+  if (f === TOOLS[tool].fields[0] && f.type === 'csv') {
     if (meta?.error) return [meta.error, 't-err'];
     if (meta?.rows != null) {
       const need = REQUIRED_COLS[tool] || [];

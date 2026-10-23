@@ -22,6 +22,7 @@ from dataprocessor.wayback_section import wayback
 from dataprocessor.wayback_section import wayback_UI
 from dataprocessor.links_checker_section import links_checker
 from dataprocessor.links_checker_section import links_checker_UI
+from dataprocessor.summary_section import summary as summary_logic
 
 # SETUP ---------------------------------------------------------------------------
 # GUI versions of the run loops in the terminal pages. They call the same logic
@@ -199,6 +200,7 @@ LOADERS = {
     "spider": spider.load_csv,
     "wayback": wayback.load_csv,
     "links": pd.read_csv,
+    "summary": summary_logic.load_csv,
 }
 
 
@@ -769,6 +771,66 @@ def run_links(ctx, p):
 # ---------------------------------------------------------------------------------
 
 
+# SUMMARY (summary_section/summary_UI.py) -----------------------------------------
+def run_summary(ctx, p):
+    input_path = clean_path(p.get("input"))
+    df = require_csv(summary_logic.load_csv, input_path)
+    if len(df) == 0:
+        raise ValueError("The CSV file contains no rows.")
+    for col in summary_logic.REQUIRED_COLS:
+        require_column(df, col)
+    year_col = summary_logic.find_year_col(df)
+    if year_col is None:
+        raise ValueError(f"No 'year' column in the file. Available: {', '.join(map(str, df.columns))}")
+
+    # blank output → <input>_matrix.csv next to the input, same as the terminal page
+    input_name = os.path.splitext(os.path.basename(input_path))[0]
+    output_path = output_beside(input_path, p.get("output") or f"{input_name}_matrix.csv")
+    if not output_path.lower().endswith(".csv"):
+        output_path += ".csv"
+    if os.path.abspath(output_path) == os.path.abspath(input_path):
+        raise ValueError("The output is the input file. Pick another name.")
+
+    ctx.phase(f"Building the org × year matrix from {len(df):,} rows")
+    time_start = time.time()
+    out, stats_df, stats = summary_logic.build_matrix(df, year_col)
+    out.to_csv(output_path, index=False)
+    stats_df.to_csv(summary_logic.stats_path(output_path), index=False)
+
+    # one results row per org, the Yrly Sum row last
+    year_cols = [c for c in out.columns if c not in ("Name", "domain", "Org Sum", "Consecutive Yrs")]
+    ctx.set_total(len(out), "orgs")
+    for _, r in out.iterrows():
+        present = [c for c in year_cols if r[c] > 0]
+        ctx.row({
+            "name": text(r["Name"], 60),
+            "domain": text(r["domain"], 40),
+            "years": int(r["Org Sum"]),
+            "streak": int(r["Consecutive Yrs"]),
+            "span": f"{present[0]}–{present[-1]}" if present else "",
+            "total": r["Name"] == "Yrly Sum",
+        })
+    ctx.set_done(len(out))
+
+    return summary(
+        "Run complete",
+        [
+            ["Unique years", f"{stats['unique_years']:,}"],
+            ["Longest streak", f"{stats['longest_run']:,} consecutive years"],
+            ["Annual reports", f"{stats['reports']:,}  ({stats['duplicates']:,} duplicate org-year rows merged)"],
+            ["Orgs", f"{stats['orgs']:,}"],
+            ["No domain", f"{stats['no_domain']:,} orgs"],
+            ["Years", f"{stats['first_year']} – {stats['last_year']}  ({stats['year_columns']} columns)"],
+            ["Rows dropped", f"{stats['dropped_undated']:,} undated, {stats['dropped_out_of_range']:,} outside {summary_logic.MIN_YEAR}-{summary_logic.MAX_YEAR}"],
+            ["Elapsed", fmt_secs(time.time() - time_start)],
+            ["Output file", output_path],
+            ["Stats file", summary_logic.stats_path(output_path)],
+        ],
+        output_path,
+    )
+# ---------------------------------------------------------------------------------
+
+
 RUNNERS = {
     "filter": run_filter,
     "analysis": run_analysis,
@@ -777,7 +839,8 @@ RUNNERS = {
     "spider": run_spider,
     "wayback": run_wayback,
     "links": run_links,
+    "summary": run_summary,
 }
 
 # Tools whose logic runs in one blocking call with no place to stop between steps.
-NOT_CANCELLABLE = {"propublica", "spider", "wayback"}
+NOT_CANCELLABLE = {"propublica", "spider", "wayback", "summary"}

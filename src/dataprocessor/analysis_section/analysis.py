@@ -39,8 +39,10 @@ GPT_KEY = os.getenv("GPT_key")
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-v4-pro"
-GEMINI_MODEL = "gemini-3.8-flash"
-GPT_MODEL = "gpt-6-luna"
+# GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_MODEL = "gemini-4-argon"
+GPT_MODEL = "gpt-6.1-sol"
+# GPT_MODEL = "gpt-6-luna"
 
 # NOTE: HELPERS FUNCTIONS
 

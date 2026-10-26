@@ -17,6 +17,7 @@ from urllib.parse import urlparse, parse_qs
 from rich.console import Console
 import sys, os
 from rich.progress import Progress
+import threading
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 PRO_PUBLICA_URL = "https://projects.propublica.org/nonprofits/api/v2"
@@ -46,6 +47,10 @@ BLOCKED_DOMAINS = {"irs.gov", "propublica.org", "adobe.com", "intuit.com", "form
 
 NO_DOMAIN_VALUES = {"n/a", "na", "none", "nla", "nia", "not applicable", "same"}
 
+# OCR machine settings
+OCR_WORKERS = int(5)
+OCR_SLOTS = threading.BoundedSemaphore(OCR_WORKERS)
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
 def resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
@@ -89,10 +94,22 @@ def IMG_to_pdf(pdf_reader, max_pages):
 
     # jobs=1 because the UI already runs a batch of these in parallel, letting
     # each one grab every core just thrashes
+
     try:
-        ocrmypdf.ocr(tmp_path, output_path, deskew=True, force_ocr=True, progress_bar=False, jobs=1)
+        with OCR_SLOTS:
+            ocrmypdf.ocr(
+                tmp_path,
+                output_path,
+                deskew=True,
+                force_ocr=True,
+                progress_bar=False,
+                jobs = 1,
+                output_type = "pdf",
+                optimize=0
+            )
     finally:
         os.remove(tmp_path)
+   
 
     return output_path
 

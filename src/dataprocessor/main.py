@@ -19,6 +19,7 @@ from dataprocessor.analysis_section import analysis_ui
 from dataprocessor.links_checker_section import links_checker_UI
 from dataprocessor.summary_section import summary_UI
 from dataprocessor.analysis_v2_section import analysis_v2_ui
+from dataprocessor.adjudicator_section import adjudicator_ui
 # SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
@@ -48,15 +49,14 @@ LINK_CHECKER = "Link Checker"
 SUMMARY = "Summary"
 SETTINGS = "Settings"
 LLM_ANALYSIS_V2 = "LLM Analysis V2"
+ADJUDICATOR = "Adjudicator"
 
 
 
 
 def main():
-    
-
     main_page.show()
-    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,WAYBACK_SECTION,LINK_CHECKER,SUMMARY,SETTINGS]).ask()
+    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,WAYBACK_SECTION,LINK_CHECKER,ADJUDICATOR,SUMMARY,SETTINGS]).ask()
     
     if choice == FILTER_PAGE:
         filter_page.show()
@@ -82,14 +82,16 @@ def main():
         wayback_UI.show()
     elif choice == LINK_CHECKER:
         links_checker_UI.show()
+    elif choice == ADJUDICATOR:
+        adjudicator_ui.show()
     elif choice == SUMMARY:
         summary_UI.show()
     elif choice == SETTINGS:
         settings_page.show()
+    
 
 if __name__ == "__main__":
     main()
-
 # ---------------------------------------------------------------------------------
 # run locally:            uv run dataprocessor
 # run GUI locally:        uv run dataprocessor-gui

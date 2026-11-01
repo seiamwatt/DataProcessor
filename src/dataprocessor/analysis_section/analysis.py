@@ -202,7 +202,6 @@ def deepseek_batch(reports,api_key):
 
     return result_rows
 
-
 #  NOTE: Gemini
 def gemini_batch_submit(reports,api_key):
     client = genai.Client(api_key=api_key)

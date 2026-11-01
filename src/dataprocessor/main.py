@@ -18,6 +18,7 @@ from dataprocessor.wayback_section import wayback_UI
 from dataprocessor.analysis_section import analysis_ui
 from dataprocessor.links_checker_section import links_checker_UI
 from dataprocessor.summary_section import summary_UI
+from dataprocessor.analysis_v2_section import analysis_v2_ui
 # SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
@@ -46,6 +47,7 @@ SPIDER_V2 = "Spider v2"
 LINK_CHECKER = "Link Checker"
 SUMMARY = "Summary"
 SETTINGS = "Settings"
+LLM_ANALYSIS_V2 = "LLM Analysis V2"
 
 
 
@@ -59,9 +61,11 @@ def main():
     if choice == FILTER_PAGE:
         filter_page.show()
     elif choice == ANALYSIS_SECTION:
-        choice = questionary.select("Select version", choices = [LLM_ANALYSIS]).ask()
+        choice = questionary.select("Select version", choices = [LLM_ANALYSIS,LLM_ANALYSIS_V2]).ask()
         if choice == LLM_ANALYSIS:
             analysis_ui.show()
+        elif choice == LLM_ANALYSIS_V2:
+            analysis_v2_ui.show()
     elif choice == PROPUBLICA_SECTION:
         choice = questionary.select("Select tool", choices= [PROPUBLICA_ORG_FINDER,PROPUBLICA_DOMAIN_FINDER]).ask()
         if choice == PROPUBLICA_ORG_FINDER:

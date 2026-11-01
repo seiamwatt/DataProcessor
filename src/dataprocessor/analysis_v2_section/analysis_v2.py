@@ -21,7 +21,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 console = Console()
-from dataprocessor.analysis_section import prompts
+from dataprocessor.analysis_v2_section import prompts
 from tenacity import (
     retry,
     retry_if_exception_type,

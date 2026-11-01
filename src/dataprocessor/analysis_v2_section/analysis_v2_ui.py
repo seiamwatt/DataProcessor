@@ -40,7 +40,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 from dataprocessor.analysis_v2_section import analysis_v2 as analysis
-from dataprocessor.analysis_section import prompts
+from dataprocessor.analysis_v2_section import prompts
 
 
 console = Console()
@@ -118,10 +118,17 @@ def run_summary_panel(id,start_row,end_row,time_elapsed,output_path) -> Panel:
 
 
 
-ID_COLUMNS = ["org", "ein", "domain", "year"]
+# coding manual administrative record, columns 1-9
+ADMIN_COLUMNS = [
+    "Organization", "Year_start", "Year_end", "Document_ID", "Coding_status",
+    "Document_type", "Source_URL", "Review_scope", "Coding_notes",
+]
+# not in the manual, kept so rows can still be matched back to the source csv
+EXTRA_ID_COLUMNS = ["ein", "domain"]
 # column prefix per model, each model gets its own block of analysis columns
 MODEL_PREFIXES = {"gemini": "gm", "gpt": "gpt"}
-OUTPUT_COLUMNS = ID_COLUMNS + ["url"] + [
+MODEL_NAMES = {"gemini": analysis.GEMINI_MODEL, "gpt": analysis.GPT_MODEL}
+OUTPUT_COLUMNS = ADMIN_COLUMNS + EXTRA_ID_COLUMNS + [
     f"{prefix}_{col}" for prefix in MODEL_PREFIXES.values() for col in prompts.ANALYSIS_COLUMNS
 ]
 RETRIES = 3
@@ -170,6 +177,38 @@ def gpt_run(reports,api_key):
     if result_rows is None:
         raise RuntimeError(f"gpt batch {batch_id} still running after wait")
     return result_rows
+
+# administrative fields, taken from the source csv when it has them
+def admin_record(source_row,url,report,model_results,j):
+    year = source_row.get("year", "")
+    failed = [model for model, result_rows in model_results.items() if result_rows[j] is None]
+
+    if report[1] is None:
+        status = "Pending"
+        scope = "No text extracted"
+    elif failed:
+        status = "Awaiting review"
+        scope = "Full extracted PDF text"
+    else:
+        status = "Completed"
+        scope = "Full extracted PDF text"
+
+    notes = f"LLM coders: {', '.join(f'{m} {n}' for m, n in MODEL_NAMES.items())}; {datetime.now():%Y-%m-%d}; protocol {prompts.PROTOCOL_VERSION}"
+    if failed:
+        notes += f"; failed: {', '.join(failed)}"
+
+    return {
+        "Organization": source_row.get("Organization", source_row.get("org", "")),
+        "Year_start": source_row.get("Year_start", year),
+        "Year_end": source_row.get("Year_end", year),
+        "Document_ID": source_row.get("Document_ID", f"{source_row.get('ein', '')}_{year}"),
+        "Coding_status": status,
+        "Document_type": source_row.get("Document_type", "Annual report"),
+        "Source_URL": url,
+        "Review_scope": scope,
+        "Coding_notes": notes,
+    }
+
 
 def model_result(future,model,num_reports):
     try:
@@ -271,10 +310,9 @@ def show():
                 for j in range(len(batch)):
                     source_row = batch.iloc[j]
 
-                    result_row = {}
-                    for col in ID_COLUMNS:
+                    result_row = admin_record(source_row,source_row[col_name],reports[j],model_results,j)
+                    for col in EXTRA_ID_COLUMNS:
                         result_row[col] = source_row.get(col, "")
-                    result_row["url"] = source_row[col_name]
 
                     for model, result_rows in model_results.items():
                         prefix = MODEL_PREFIXES[model]

@@ -295,14 +295,14 @@ def show():
                 reports = analysis.create_reports_batch(url_links)
 
                 with ThreadPoolExecutor(max_workers = 2) as process:
-                    gemini_process = process.submit(gemini_run,reports,gemini_api_key)
+                    # gemini_process = process.submit(gemini_run,reports,gemini_api_key)
                     gpt_process = process.submit(gpt_run,reports,gpt_api_key)
 
-                    result_gemini = model_result(gemini_process,"gemini",len(reports))
+                    # result_gemini = model_result(gemini_process,"gemini",len(reports))
                     result_gpt = model_result(gpt_process,"gpt",len(reports))
 
                 model_results = {
-                    "gemini": result_gemini,
+                    # "gemini": result_gemini,
                     "gpt": result_gpt
                 }
 

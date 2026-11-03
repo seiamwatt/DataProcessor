@@ -41,7 +41,8 @@ GPT_MODEL = "gpt-6-luna"
 
 def load_csv(file_path):
     try:
-        file = pd.read_csv(file_path,encoding="utf-8")
+        # read everything as text so original columns are written back untouched (e.g. ein leading zeros)
+        file = pd.read_csv(file_path,encoding="utf-8",dtype=str,keep_default_na=False)
         return file
     except Exception as e:
         print(e)

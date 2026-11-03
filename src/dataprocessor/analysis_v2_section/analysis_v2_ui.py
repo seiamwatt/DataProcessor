@@ -118,17 +118,12 @@ def run_summary_panel(id,start_row,end_row,time_elapsed,output_path) -> Panel:
 
 
 
-# coding manual administrative record, columns 1-9
-ADMIN_COLUMNS = [
-    "Organization", "Year_start", "Year_end", "Document_ID", "Coding_status",
-    "Document_type", "Source_URL", "Review_scope", "Coding_notes",
-]
-# not in the manual, kept so rows can still be matched back to the source csv
-EXTRA_ID_COLUMNS = ["ein", "domain"]
+# output = original input columns untouched, then document/status columns, then analysis columns
+STATUS_COLUMNS = ["Document_ID", "Document_type", "Source_URL", "Coding_status", "Review_scope", "Coding_notes"]
 # column prefix per model, each model gets its own block of analysis columns
 MODEL_PREFIXES = {"gemini": "gm", "gpt": "gpt"}
 MODEL_NAMES = {"gemini": analysis.GEMINI_MODEL, "gpt": analysis.GPT_MODEL}
-OUTPUT_COLUMNS = ADMIN_COLUMNS + EXTRA_ID_COLUMNS + [
+ANALYSIS_OUTPUT_COLUMNS = STATUS_COLUMNS + [
     f"{prefix}_{col}" for prefix in MODEL_PREFIXES.values() for col in prompts.ANALYSIS_COLUMNS
 ]
 RETRIES = 3
@@ -178,9 +173,8 @@ def gpt_run(reports,api_key):
         raise RuntimeError(f"gpt batch {batch_id} still running after wait")
     return result_rows
 
-# administrative fields, taken from the source csv when it has them
-def admin_record(source_row,url,report,model_results,j):
-    year = source_row.get("year", "")
+# document and coding status fields for one report
+def status_record(source_row,url,report,model_results,j):
     failed = [model for model, result_rows in model_results.items() if result_rows[j] is None]
 
     if report[1] is None:
@@ -198,13 +192,10 @@ def admin_record(source_row,url,report,model_results,j):
         notes += f"; failed: {', '.join(failed)}"
 
     return {
-        "Organization": source_row.get("Organization", source_row.get("org", "")),
-        "Year_start": source_row.get("Year_start", year),
-        "Year_end": source_row.get("Year_end", year),
-        "Document_ID": source_row.get("Document_ID", f"{source_row.get('ein', '')}_{year}"),
-        "Coding_status": status,
+        "Document_ID": source_row.get("Document_ID", f"{source_row.get('ein', '')}_{source_row.get('year', '')}"),
         "Document_type": source_row.get("Document_type", "Annual report"),
         "Source_URL": url,
+        "Coding_status": status,
         "Review_scope": scope,
         "Coding_notes": notes,
     }
@@ -261,6 +252,7 @@ def show():
             console.print(f"[{ERR_BAR}] ERR [/] [{RED}]API key not found.[/] [{MUTED}]Add API keys to the .env file and restart the application.[/]")
             continue
 
+        output_columns = list(df.columns) + [col for col in ANALYSIS_OUTPUT_COLUMNS if col not in df.columns]
         df_subset = df.iloc[start_row:end_row]
         BATCH = batch_size
 
@@ -310,9 +302,8 @@ def show():
                 for j in range(len(batch)):
                     source_row = batch.iloc[j]
 
-                    result_row = admin_record(source_row,source_row[col_name],reports[j],model_results,j)
-                    for col in EXTRA_ID_COLUMNS:
-                        result_row[col] = source_row.get(col, "")
+                    result_row = source_row.to_dict()
+                    result_row.update(status_record(source_row,source_row[col_name],reports[j],model_results,j))
 
                     for model, result_rows in model_results.items():
                         prefix = MODEL_PREFIXES[model]
@@ -331,7 +322,7 @@ def show():
                 progress.console.print(f"[{OK_BAR}] OK [/] [{MUTED}]rows {row_track:,} – {row_track + len(batch):,} → {', '.join(ok_counts)}[/]")
                 row_track += len(batch)
 
-                batch_result = pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
+                batch_result = pd.DataFrame(rows, columns=output_columns)
 
                 if os.path.exists(output_path):
                     write_header = False

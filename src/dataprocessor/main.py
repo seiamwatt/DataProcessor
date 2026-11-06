@@ -20,6 +20,7 @@ from dataprocessor.links_checker_section import links_checker_UI
 from dataprocessor.summary_section import summary_UI
 from dataprocessor.analysis_v2_section import analysis_v2_ui
 from dataprocessor.adjudicator_section import adjudicator_ui
+from dataprocessor.api_selector import api_selector
 # SETUP ---------------------------------------------------------------------------
 
 console = Console(color_system="truecolor")
@@ -50,13 +51,14 @@ SUMMARY = "Summary"
 SETTINGS = "Settings"
 LLM_ANALYSIS_V2 = "LLM Analysis V2"
 ADJUDICATOR = "Adjudicator"
+API_SELECTOR = "API Selector"
 
 
 
 
 def main():
     main_page.show()
-    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,WAYBACK_SECTION,LINK_CHECKER,ADJUDICATOR,SUMMARY,SETTINGS]).ask()
+    choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,WAYBACK_SECTION,LINK_CHECKER,ADJUDICATOR,SUMMARY,API_SELECTOR,SETTINGS]).ask()
     
     if choice == FILTER_PAGE:
         filter_page.show()
@@ -86,6 +88,8 @@ def main():
         adjudicator_ui.show()
     elif choice == SUMMARY:
         summary_UI.show()
+    elif choice == API_SELECTOR:
+        api_selector.show()
     elif choice == SETTINGS:
         settings_page.show()
     

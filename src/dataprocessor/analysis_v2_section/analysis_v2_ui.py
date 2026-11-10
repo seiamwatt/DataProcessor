@@ -278,13 +278,16 @@ def show():
             for i in range(0,len(df_subset),BATCH):
                 rows = []
                 url_links = []
+                sources = []
                 batch = df_subset.iloc[i:i + BATCH]
 
                 for j in range(len(batch)):
                     url_link = batch.iloc[j][col_name]
                     url_links.append(url_link)
+                    # rows with source == "wayback" are rate limited against web.archive.org
+                    sources.append(batch.iloc[j].get("source"))
 
-                reports = analysis.create_reports_batch(url_links)
+                reports = analysis.create_reports_batch(url_links,sources)
 
                 with ThreadPoolExecutor(max_workers = 2) as process:
                     # gemini_process = process.submit(gemini_run,reports,gemini_api_key)

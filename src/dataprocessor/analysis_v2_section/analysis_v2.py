@@ -29,6 +29,8 @@ from tenacity import (
     stop_after_delay,
     wait_exponential,
 )
+import threading
+from collections import deque
 # keys
 load_dotenv()
 GEMINI_KEY = os.getenv("Gemini_key")
@@ -63,11 +65,99 @@ def IMG_to_pdf(file_path):
     ocrmypdf.ocr(file_path,output_path,deskew=True,skip_text=True)
     return output_path
 
-def extract_pdf_text(pdf_url):
+# NOTE: rate limiting for web.archive.org downloads
+
+class RateLimiter:
+    """At most max_request requests in any window_size seconds, shared by all threads.
+    acquire() blocks until a slot is free; cooldown() pauses everyone (e.g. after a 429)."""
+
+    def __init__(self,window_size,max_request):
+        self.window_size = window_size
+        self.max_request = max_request
+        self.requests = deque()
+        self.cooldown_until = 0
+        self.lock = threading.Lock()
+
+    def acquire(self):
+        while True:
+            with self.lock:
+                time_now = time.monotonic()
+
+                while self.requests and self.requests[0] <= time_now - self.window_size:
+                    self.requests.popleft()
+
+                if time_now < self.cooldown_until:
+                    wait = self.cooldown_until - time_now
+                elif len(self.requests) < self.max_request:
+                    self.requests.append(time_now)
+                    return
+                else:
+                    wait = self.requests[0] + self.window_size - time_now
+
+            # sleep outside the lock so other threads can still check in
+            time.sleep(wait)
+
+    def cooldown(self,seconds):
+        with self.lock:
+            self.cooldown_until = max(self.cooldown_until,time.monotonic() + seconds)
+
+
+# CDX API allows 60/min, stay under it
+ARCHIVE_RPM = int(os.getenv("WAYBACK_RPM", 50))
+ARCHIVE_LIMITER = RateLimiter(window_size=60,max_request=ARCHIVE_RPM)
+ARCHIVE_MAX_TRIES = 5
+ARCHIVE_COOLDOWN = 60          # pause when throttled without a Retry-After
+ARCHIVE_MAX_COOLDOWN = 600     # cap on an honoured Retry-After
+THROTTLE_STATUSES = {429, 503}
+
+# the archive blocks the default python-requests user agent more aggressively
+HTTP = requests.Session()
+HTTP.headers["User-Agent"] = os.getenv("USER_AGENT","nonprofit-reports/1.2 (+research)")
+
+
+def is_wayback(source):
+    return str(source or "").strip().lower() == "wayback"
+
+
+def retry_after_seconds(response):
+    raw = (response.headers.get("Retry-After") or "").strip()
+    if raw.isdigit():
+        return min(int(raw),ARCHIVE_MAX_COOLDOWN)
+    return ARCHIVE_COOLDOWN
+
+
+def fetch_pdf(pdf_url,source=None):
+    # only rows whose source is "wayback" go through the shared limiter
+    if not is_wayback(source):
+        response = HTTP.get(pdf_url, timeout=30)
+        response.raise_for_status()
+        return response
+
+    for attempt in range(1, ARCHIVE_MAX_TRIES + 1):
+        ARCHIVE_LIMITER.acquire()
+        try:
+            response = HTTP.get(pdf_url, timeout=30)
+        except requests.ConnectionError:
+            # a refused connection is how the archive blocks after repeated 429s
+            if attempt == ARCHIVE_MAX_TRIES:
+                raise
+            ARCHIVE_LIMITER.cooldown(ARCHIVE_COOLDOWN * attempt)
+            continue
+
+        if response.status_code in THROTTLE_STATUSES and attempt < ARCHIVE_MAX_TRIES:
+            pause = retry_after_seconds(response)
+            print(f"archive throttled ({response.status_code}), pausing {pause}s")
+            ARCHIVE_LIMITER.cooldown(pause)
+            continue
+
+        response.raise_for_status()
+        return response
+
+
+def extract_pdf_text(pdf_url,source=None):
 
     try:
-        response = requests.get(pdf_url, timeout=30)
-        response.raise_for_status()
+        response = fetch_pdf(pdf_url,source)
 
         pdf_file = BytesIO(response.content)
         pdf_reader = PyPDF2.PdfReader(pdf_file)
@@ -98,10 +188,11 @@ def extract_pdf_text(pdf_url):
         return None
 
 
-def create_reports_batch(url_links):
+def create_reports_batch(url_links,sources=None):
     reports = []
-    for url in url_links:
-        extracted_text = extract_pdf_text(url)
+    sources = sources or [None] * len(url_links)
+    for url, source in zip(url_links, sources):
+        extracted_text = extract_pdf_text(url,source)
         if not extracted_text:
             print(f"skipping {url}: no text extracted")
             reports.append([extracted_text,None])

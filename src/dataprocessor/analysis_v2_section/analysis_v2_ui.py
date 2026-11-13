@@ -37,6 +37,8 @@ import pytz
 import re
 import json
 from concurrent.futures import ThreadPoolExecutor
+import threading
+import queue
 
 
 from dataprocessor.analysis_v2_section import analysis_v2 as analysis
@@ -128,6 +130,10 @@ ANALYSIS_OUTPUT_COLUMNS = STATUS_COLUMNS + [
 ]
 RETRIES = 3
 RETRY_SECONDS = 10
+# batches allowed to run at once; openai caps queued tokens per model, so too many fail with token_limit_exceeded
+MAX_IN_FLIGHT = int(os.getenv("MAX_IN_FLIGHT_BATCHES", 4))
+# marks the end of the extraction queue
+EXTRACTION_DONE = object()
 
 
 # dragged paths come in quoted or with escaped spaces
@@ -208,6 +214,56 @@ def model_result(future,model,num_reports):
         console.print(f"[{ERR_BAR}] ERR [/] [{RED}]{model} failed:[/] [{MUTED}]{e}[/]")
         return [None] * num_reports
 
+
+# one chunk of rows whose batch jobs are running in the background
+class Chunk:
+    def __init__(self,batch,reports,row_start,futures):
+        self.batch = batch
+        self.reports = reports
+        self.row_start = row_start
+        self.futures = futures   # {model: future}
+
+    def done(self):
+        return all(future.done() for future in self.futures.values())
+
+
+# waits for a chunk's batch jobs, then appends its rows to the csv
+def write_chunk(chunk,col_name,output_columns,output_path,progress,task):
+    batch = chunk.batch
+    model_results = {
+        model: model_result(future,model,len(chunk.reports))
+        for model, future in chunk.futures.items()
+    }
+
+    # one output row per report, models side by side as prefixed columns
+    rows = []
+    for j in range(len(batch)):
+        source_row = batch.iloc[j]
+
+        result_row = source_row.to_dict()
+        result_row.update(status_record(source_row,source_row[col_name],chunk.reports[j],model_results,j))
+
+        for model, result_rows in model_results.items():
+            prefix = MODEL_PREFIXES[model]
+            result = result_rows[j]
+            if not isinstance(result, dict):
+                result = {}
+            for col in prompts.ANALYSIS_COLUMNS:
+                result_row[f"{prefix}_{col}"] = result.get(col)
+
+        rows.append(result_row)
+
+    ok_counts = []
+    for model, result_rows in model_results.items():
+        ok = sum(1 for result in result_rows if result is not None)
+        ok_counts.append(f"{model} {ok}/{len(batch)}")
+    progress.console.print(f"[{OK_BAR}] OK [/] [{MUTED}]rows {chunk.row_start:,} – {chunk.row_start + len(batch):,} → {', '.join(ok_counts)}[/]")
+
+    batch_result = pd.DataFrame(rows, columns=output_columns)
+    write_header = not os.path.exists(output_path)
+    batch_result.to_csv(output_path, mode='a', header=write_header, index=False)
+    progress.update(task, advance=1)
+
 def show():
     status = True
     load_env()
@@ -257,7 +313,6 @@ def show():
         BATCH = batch_size
 
         total_batches = (len(df_subset) + BATCH - 1) // BATCH
-        row_track = start_row
 
         console.print(Rule(Text(" Processing ", style=ACCENT_BAR), style=ACCENT))
 
@@ -275,65 +330,66 @@ def show():
             time_start = time.time()
             task1 = progress.add_task("Analysing data",total=total_batches)
 
-            for i in range(0,len(df_subset),BATCH):
-                rows = []
-                url_links = []
-                sources = []
-                batch = df_subset.iloc[i:i + BATCH]
+            # chunks whose batches are running, oldest first so the csv stays in row order
+            pending = deque()
+            # extracted chunks waiting for a batch slot
+            extracted = queue.Queue()
 
-                for j in range(len(batch)):
-                    url_link = batch.iloc[j][col_name]
-                    url_links.append(url_link)
-                    # rows with source == "wayback" are rate limited against web.archive.org
-                    sources.append(batch.iloc[j].get("source"))
+            def write_oldest():
+                write_chunk(pending.popleft(),col_name,output_columns,output_path,progress,task1)
 
-                reports = analysis.create_reports_batch(url_links,sources)
+            def write_finished():
+                while pending and pending[0].done():
+                    write_oldest()
 
-                with ThreadPoolExecutor(max_workers = 2) as process:
-                    # gemini_process = process.submit(gemini_run,reports,gemini_api_key)
-                    gpt_process = process.submit(gpt_run,reports,gpt_api_key)
+            # text extraction runs on its own thread so it keeps going while batches are at the cap
+            def extract_all():
+                try:
+                    for i in range(0,len(df_subset),BATCH):
+                        batch = df_subset.iloc[i:i + BATCH]
+                        url_links = [batch.iloc[j][col_name] for j in range(len(batch))]
+                        # rows with source == "wayback" are rate limited against web.archive.org
+                        sources = [batch.iloc[j].get("source") for j in range(len(batch))]
+                        reports = analysis.create_reports_batch(url_links,sources)
+                        extracted.put((batch,reports,start_row + i))
+                except Exception as e:
+                    extracted.put(e)
+                    return
+                extracted.put(EXTRACTION_DONE)
 
-                    # result_gemini = model_result(gemini_process,"gemini",len(reports))
-                    result_gpt = model_result(gpt_process,"gpt",len(reports))
+            threading.Thread(target=extract_all,daemon=True).start()
 
-                model_results = {
-                    # "gemini": result_gemini,
-                    "gpt": result_gpt
-                }
+            # each model's batch for a chunk runs in its own thread: submit, wait, collect
+            with ThreadPoolExecutor(max_workers = MAX_IN_FLIGHT * len(MODEL_PREFIXES)) as process:
+                while True:
+                    try:
+                        item = extracted.get(timeout=1)
+                    except queue.Empty:
+                        # nothing extracted yet, write any batches that finished meanwhile
+                        write_finished()
+                        continue
 
-                # one output row per report, models side by side as prefixed columns
-                for j in range(len(batch)):
-                    source_row = batch.iloc[j]
+                    if item is EXTRACTION_DONE:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
 
-                    result_row = source_row.to_dict()
-                    result_row.update(status_record(source_row,source_row[col_name],reports[j],model_results,j))
+                    batch, reports, row_start = item
 
-                    for model, result_rows in model_results.items():
-                        prefix = MODEL_PREFIXES[model]
-                        result = result_rows[j]
-                        if not isinstance(result, dict):
-                            result = {}
-                        for col in prompts.ANALYSIS_COLUMNS:
-                            result_row[f"{prefix}_{col}"] = result.get(col)
+                    # at the cap, wait for the oldest batch (extraction carries on in its thread)
+                    while len(pending) >= MAX_IN_FLIGHT:
+                        write_oldest()
 
-                    rows.append(result_row)
+                    futures = {
+                        # "gemini": process.submit(gemini_run,reports,gemini_api_key),
+                        "gpt": process.submit(gpt_run,reports,gpt_api_key),
+                    }
+                    pending.append(Chunk(batch,reports,row_start,futures))
+                    write_finished()
 
-                ok_counts = []
-                for model, result_rows in model_results.items():
-                    ok = sum(1 for result in result_rows if result is not None)
-                    ok_counts.append(f"{model} {ok}/{len(batch)}")
-                progress.console.print(f"[{OK_BAR}] OK [/] [{MUTED}]rows {row_track:,} – {row_track + len(batch):,} → {', '.join(ok_counts)}[/]")
-                row_track += len(batch)
-
-                batch_result = pd.DataFrame(rows, columns=output_columns)
-
-                if os.path.exists(output_path):
-                    write_header = False
-                else:
-                    write_header = True
-
-                batch_result.to_csv(output_path, mode='a', header=write_header, index=False)
-                progress.update(task1, advance=1)
+                # extraction done, wait for the remaining batches
+                while pending:
+                    write_oldest()
 
             id = str(uuid.uuid4())
             progress.stop()

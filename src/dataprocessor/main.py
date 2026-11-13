@@ -19,6 +19,7 @@ from dataprocessor.analysis_section import analysis_ui
 from dataprocessor.links_checker_section import links_checker_UI
 from dataprocessor.summary_section import summary_UI
 from dataprocessor.analysis_v2_section import analysis_v2_ui
+from dataprocessor.analysis_v2_vip import analysis_v2_ui as analysis_v2_vip_ui
 from dataprocessor.adjudicator_section import adjudicator_ui
 from dataprocessor.api_selector import api_selector
 # SETUP ---------------------------------------------------------------------------
@@ -50,6 +51,7 @@ LINK_CHECKER = "Link Checker"
 SUMMARY = "Summary"
 SETTINGS = "Settings"
 LLM_ANALYSIS_V2 = "LLM Analysis V2"
+LLM_ANALYSIS_V2_VIP = "LLM Analysis V2 VIP"
 ADJUDICATOR = "Adjudicator"
 API_SELECTOR = "API Selector"
 
@@ -63,11 +65,13 @@ def main():
     if choice == FILTER_PAGE:
         filter_page.show()
     elif choice == ANALYSIS_SECTION:
-        choice = questionary.select("Select version", choices = [LLM_ANALYSIS,LLM_ANALYSIS_V2]).ask()
+        choice = questionary.select("Select version", choices = [LLM_ANALYSIS,LLM_ANALYSIS_V2,LLM_ANALYSIS_V2_VIP]).ask()
         if choice == LLM_ANALYSIS:
             analysis_ui.show()
         elif choice == LLM_ANALYSIS_V2:
             analysis_v2_ui.show()
+        elif choice == LLM_ANALYSIS_V2_VIP:
+            analysis_v2_vip_ui.show()
     elif choice == PROPUBLICA_SECTION:
         choice = questionary.select("Select tool", choices= [PROPUBLICA_ORG_FINDER,PROPUBLICA_DOMAIN_FINDER]).ask()
         if choice == PROPUBLICA_ORG_FINDER:

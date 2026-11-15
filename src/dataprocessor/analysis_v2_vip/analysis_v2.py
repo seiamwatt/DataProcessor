@@ -10,8 +10,14 @@ import tempfile
 import threading
 from io import BytesIO
 
-import PyPDF2
+import pikepdf
 import requests
+# pypdf (not PyPDF2) decrypts AES pdfs with the `cryptography` package
+# and is more tolerant of damaged files
+from pypdf import PdfReader
+import logging
+# pypdf warns loudly about recoverable damage (missing EOF etc), keep the console clean
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 from dotenv import load_dotenv
 from tenacity import (
     retry,
@@ -58,11 +64,53 @@ def read_all_pages(pdf_reader):
     return text
 
 
+def repair_pdf(content):
+    # qpdf (via pikepdf) rebuilds broken xref tables / missing EOF markers and
+    # drops encryption that only uses an empty user password
+    with pikepdf.open(BytesIO(content)) as pdf:
+        out = BytesIO()
+        pdf.save(out)
+        return out.getvalue()
+
+
+def open_pdf(content):
+    """Return (reader, pdf_bytes). pdf_bytes may be a repaired copy of content."""
+    if not content:
+        raise ValueError("empty response, no pdf data")
+
+    # some servers return an html error page (or leading junk) instead of a pdf
+    start = content.find(b"%PDF", 0, 1024)
+    if start == -1:
+        raise ValueError(f"not a pdf (starts with {content[:40]!r})")
+    content = content[start:]
+
+    try:
+        reader = PdfReader(BytesIO(content), strict=False)
+        if reader.is_encrypted:
+            reader.decrypt("")
+        # touch the pages so broken files fail here, not halfway through extraction
+        len(reader.pages)
+        return reader, content
+    except Exception as first_error:
+        try:
+            content = repair_pdf(content)
+        except Exception:
+            raise first_error
+        reader = PdfReader(BytesIO(content), strict=False)
+        if reader.is_encrypted:
+            reader.decrypt("")
+        return reader, content
+
+
 def pdf_text_from_bytes(content):
-    pdf_reader = PyPDF2.PdfReader(BytesIO(content))
+    pdf_reader, content = open_pdf(content)
 
     if not need_ocr(pdf_reader):
         return read_all_pages(pdf_reader)
+
+    # ocrmypdf refuses encrypted input, hand it a decrypted copy
+    if pdf_reader.is_encrypted:
+        content = repair_pdf(content)
 
     # ocr works on a temp copy, so local input files are never modified
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -72,7 +120,7 @@ def pdf_text_from_bytes(content):
     try:
         with OCR_LOCK:
             IMG_to_pdf(tmp_path)
-        return read_all_pages(PyPDF2.PdfReader(tmp_path))
+        return read_all_pages(PdfReader(tmp_path, strict=False))
     finally:
         os.remove(tmp_path)
 

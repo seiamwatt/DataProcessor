@@ -95,7 +95,8 @@ def extract_pdf_text(pdf_url):
         print(f"error processing pdf: {e}")
         return None
 
-    
+
+# if batch processing ignore function for now
 def create_reports_batch(url_links):
     reports = []
     for url in url_links:
@@ -111,4 +112,7 @@ def create_reports_batch(url_links):
         prompt = [{"role": "user", "content": prompts.construct_system_prompt(extracted_text)}]
         reports.append([extracted_text,prompt])
     return reports
+
+def claude_connect():
+    pass
 

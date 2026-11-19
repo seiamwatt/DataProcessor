@@ -10,8 +10,6 @@ from dataprocessor.gui.jobs import JobManager, StdoutTee
 # SETUP ---------------------------------------------------------------------------
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 # ---------------------------------------------------------------------------------
-
-
 def main():
     load_env()
     jobs = JobManager()

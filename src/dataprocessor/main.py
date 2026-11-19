@@ -11,7 +11,7 @@ from dataprocessor.main_section import main_page
 from dataprocessor.main_section import settings_page
 from dataprocessor.filter_section import filter_page
 from dataprocessor.filter_section import report_filter_llm
-from dataprocessor.propublica_section import propublica_UI
+from dataprocessor.propublica_scrape_section import propublica_UI
 from dataprocessor.propublica_domain_finder_section import domain_finder_UI
 from dataprocessor.Spider_section import spider_UI
 from dataprocessor.wayback_section import wayback_UI
@@ -20,7 +20,7 @@ from dataprocessor.links_checker_section import links_checker_UI
 from dataprocessor.summary_section import summary_UI
 from dataprocessor.analysis_v2_section import analysis_v2_ui
 from dataprocessor.analysis_v2_vip import analysis_v2_ui as analysis_v2_vip_ui
-from dataprocessor.adjudicator_section import adjudicator_ui
+from dataprocessor.adjudicator_deepseek_section import adjudicator_ui
 from dataprocessor.api_selector import api_selector
 # SETUP ---------------------------------------------------------------------------
 

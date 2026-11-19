@@ -34,7 +34,7 @@ import boto3
 import pytz
 import pandas as pd
 
-from dataprocessor.propublica_section import propublica_logic
+from dataprocessor.propublica_scrape_section import propublica_logic
 
 console = Console()
 

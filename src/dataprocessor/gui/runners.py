@@ -14,7 +14,7 @@ from dataprocessor.filter_section import filter_page
 from dataprocessor.analysis_section import analysis
 from dataprocessor.analysis_section import analysis_ui
 from dataprocessor.analysis_section import prompts
-from dataprocessor.propublica_section import propublica_logic
+from dataprocessor.propublica_scrape_section import propublica_logic
 from dataprocessor.propublica_domain_finder_section import domain_finder
 from dataprocessor.Spider_section import spider
 from dataprocessor.Spider_section import spider_UI

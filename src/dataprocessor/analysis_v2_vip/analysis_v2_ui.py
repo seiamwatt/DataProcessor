@@ -38,17 +38,23 @@ console = Console()
 os.environ["TERM"] = "xterm-256color"
 load_env()
 
-# output = source csv columns untouched, Document_ID/Document_type/Source_URL, file, status columns, analysis columns
+# output matches ar_analysis.csv:
+#   source csv columns untouched, Document_ID/Document_type/Source_URL, status columns, gm_*/gpt_* analysis columns,
+#   url_classification_reason, source_file
 # csv input: the source csv is the input itself
-# folder input: the source csv is asked for, each pdf is matched to its row in matching.py
+# folder input: the source csv is asked for, each file is matched to its row in matching.py;
+#   unmatched files have no source row, they go to <output>_unmatched.csv with their file name instead
 ID_COLUMNS = ["url", "file"]
 STATUS_COLUMNS = ["Coding_status", "Review_scope", "Coding_notes"]
 MODEL_PREFIXES = {"gemini": "gm", "gpt": "gpt"}
 MODEL_NAMES = {"gemini": analysis.GEMINI_MODEL, "gpt": analysis.GPT_MODEL}
 MODEL_KEYS = {"gemini": "Gemini_key", "gpt": "GPT_key"}
-OUTPUT_COLUMNS = ID_COLUMNS + STATUS_COLUMNS + [
+ANALYSIS_OUTPUT_COLUMNS = STATUS_COLUMNS + [
     f"{prefix}_{col}" for prefix in MODEL_PREFIXES.values() for col in prompts.ANALYSIS_COLUMNS
 ]
+# url_classification_reason comes from the url classification step, copied when the source csv has it
+# source_file = the analysis csv the row was written to
+TAIL_COLUMNS = ["url_classification_reason", "source_file"]
 DEFAULT_WORKERS = int(os.getenv("VIP_WORKERS", 60))
 
 # folder input gets these internal columns (never written), named so they cannot clash with the source csv
@@ -273,8 +279,14 @@ def ask_source(folder_df):
     return df, list(source.columns)
 
 
+# same column layout as ar_analysis.csv
+def output_columns_for(meta_columns):
+    added = matching.DERIVED_COLUMNS + ANALYSIS_OUTPUT_COLUMNS + TAIL_COLUMNS
+    return meta_columns + [col for col in added if col not in meta_columns]
+
+
 # source csv values first, then derived document fields, then status and analysis values
-def output_record(row, result_row, meta_columns):
+def output_record(row, result_row, meta_columns, source_file):
     record = {col: row[col] for col in meta_columns}
     for key, value in matching.document_fields(record).items():
         record.setdefault(key, value)
@@ -283,7 +295,14 @@ def output_record(row, result_row, meta_columns):
         if key in ID_COLUMNS and key in record:
             continue
         record[key] = value
+    record.setdefault("url_classification_reason", "")
+    record["source_file"] = source_file
     return record
+
+
+# folder input only: a file with no source row (no url) cannot be matched back to the dataset
+def is_unmatched(record):
+    return not record.get("url")
 
 
 def show():
@@ -316,11 +335,18 @@ def show():
         df_subset = df.iloc[start_row:end_row]
         total = len(df_subset)
 
-        # the url lives in the source csv's own column, so no extra url column
-        output_columns = meta_columns + [
-            col for col in matching.DERIVED_COLUMNS + OUTPUT_COLUMNS
-            if col != "url" and col not in meta_columns
-        ]
+        output_columns = output_columns_for(meta_columns)
+        source_file = os.path.basename(output_path)
+        # unmatched folder files keep their file name, they have no url to identify them
+        unmatched_path = f"{os.path.splitext(output_path)[0]}_unmatched.csv"
+        unmatched_columns = ["file"] + output_columns
+
+        # appending under a different header would put values in the wrong columns
+        if os.path.exists(output_path):
+            existing = list(pd.read_csv(output_path, nrows=0).columns)
+            if existing != output_columns:
+                console.print(f"[{ERR_BAR}] ERR [/] [{RED}]{output_path} has a different column layout.[/] [{MUTED}]Choose a new output file.[/]")
+                continue
 
         console.print(Rule(Text(" Processing ", style=ACCENT_BAR), style=ACCENT))
 
@@ -348,12 +374,18 @@ def show():
 
                 # write in input order; each row is appended as soon as it and all rows before it are done
                 for row, future in zip(rows, futures):
-                    result_row = output_record(row, future.result(), meta_columns)
+                    result = future.result()
+                    result_row = output_record(row, result, meta_columns, source_file)
                     if result_row["Coding_status"] == "Completed":
                         ok_count += 1
-                    write_header = not os.path.exists(output_path)
-                    pd.DataFrame([result_row], columns=output_columns).to_csv(
-                        output_path, mode="a", header=write_header, index=False
+                    if is_folder and is_unmatched(result_row):
+                        path, columns = unmatched_path, unmatched_columns
+                        result_row["file"] = result["file"]
+                    else:
+                        path, columns = output_path, output_columns
+                    write_header = not os.path.exists(path)
+                    pd.DataFrame([result_row], columns=columns).to_csv(
+                        path, mode="a", header=write_header, index=False
                     )
                     progress.update(task, advance=1)
 
@@ -361,6 +393,8 @@ def show():
             time_elapsed = time.time() - time_start
 
         console.print(run_summary_panel(str(uuid.uuid4()), start_row, end_row, time_elapsed, output_path, ok_count, total))
+        if is_folder and os.path.exists(unmatched_path):
+            console.print(f"[{MUTED}]Files with no source row: {unmatched_path}[/]")
 
         if not questionary.confirm("Repeat processing?", style=PROMPT_STYLE).ask():
             console.print(f"[{MUTED}]Session ended.[/]")

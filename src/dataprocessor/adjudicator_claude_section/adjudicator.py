@@ -14,7 +14,7 @@ import tempfile
 from rich.console import Console
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataprocessor.analysis_section import prompts
+from dataprocessor.system_prompt import prompt as prompts
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 console = Console()
 load_dotenv()
@@ -36,7 +36,8 @@ QUANTITATIVE_COLS = [
     "NARR_Focus", "OVERALL_Intensity",
 ]
 THRESHOLD = 20
-
+MISSING_CODE = 999
+MAX_RETRIES = 5
 
 def load_csv(file_path):
     try:
@@ -110,15 +111,18 @@ def create_reports_batch(url_links):
             print(f"skipping {url}: no text extracted")
             reports.append([extracted_text,None])
             continue
-        prompt = [{"role": "user", "content": prompts.construct_system_prompt(extracted_text)}]
+        prompt = prompts.construct_system_prompt(extracted_text)
         reports.append([extracted_text,prompt])
     return reports
 
-def connect_claude_helper(prompt,api_key):
-    client = anthropic.Anthropic(
-        api_key = api_key
-    )
+def parse_json(text):
+    # tolerate markdown fences or stray text around the object
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("no JSON object in response")
+    return json.loads(text[start:end + 1])
 
+def connect_claude_helper(prompt,client):
     response = client.messages.create(
         max_tokens = MAX_TOKENS,
         messages = [
@@ -129,19 +133,41 @@ def connect_claude_helper(prompt,api_key):
         ],
         model = CLAUDE_MODEL
     )
-    return json.loads(response.content[-1].text)
+    if response.stop_reason == "max_tokens":
+        raise ValueError(f"response truncated at {MAX_TOKENS} tokens")
+    text = "".join(block.text for block in response.content if block.type == "text")
+    return parse_json(text)
 
 def claude_batch(reports,api_key):
     MAX_WORKERS = 50
     futures = []
     result_rows = []
+    # one shared client, SDK retries rate limits and overloads with backoff
+    client = anthropic.Anthropic(api_key=api_key, max_retries=MAX_RETRIES)
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         for i in range(len(reports)):
-            pass
+            if reports[i][1] is None:
+                futures.append(None)
+                continue
 
+            future = executor.submit(connect_claude_helper,reports[i][1],client)
+            futures.append(future)
 
-# one entry per row so results line up with the batch, None url means no adjudication
+    for i in range(len(reports)):
+        if futures[i] is None:
+            result_rows.append(None)
+            continue
+        try:
+            row = futures[i].result()
+        except Exception as e:
+            print(f"error processing report {i}: {e}")
+            row = None
+
+        result_rows.append(row)
+
+    return result_rows
+
 def need_adjudicate(df,col_name="url"):
     url_links = []
     for i,row in df.iterrows():
@@ -152,6 +178,10 @@ def need_adjudicate(df,col_name="url"):
 
             # a model failed on this field, nothing to compare
             if pd.isna(gemini_col) or pd.isna(gpt_col):
+                continue
+
+            # 999 is a missing code, not a score, so a gap against it is not a disagreement
+            if gemini_col == MISSING_CODE or gpt_col == MISSING_CODE:
                 continue
 
             if abs(gemini_col - gpt_col) >= THRESHOLD:

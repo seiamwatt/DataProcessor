@@ -117,7 +117,6 @@ def extract_text_url(url):
         print(f"error processing report {url}: {e}")
         return None, None
 
-
 def extract_text_file(file_path):
     try:
         with open(file_path,"rb") as f:

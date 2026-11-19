@@ -56,8 +56,6 @@ ADJUDICATOR = "Adjudicator"
 API_SELECTOR = "API Selector"
 
 
-
-
 def main():
     main_page.show()
     choice = questionary.select("Select terminal", choices = [FILTER_PAGE,ANALYSIS_SECTION,PROPUBLICA_SECTION,SPIDER_SECTION,WAYBACK_SECTION,LINK_CHECKER,ADJUDICATOR,SUMMARY,API_SELECTOR,SETTINGS]).ask()

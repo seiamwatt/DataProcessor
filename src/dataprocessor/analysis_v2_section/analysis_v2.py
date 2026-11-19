@@ -10,7 +10,11 @@ import requests
 import pandas as pd
 from dotenv import load_dotenv
 from tqdm import tqdm
-import PyPDF2
+import logging
+import pikepdf
+# pypdf (not PyPDF2) decrypts AES pdfs with the `cryptography` package
+# and is more tolerant of damaged files
+from pypdf import PdfReader
 from io import BytesIO
 import time
 import os
@@ -35,6 +39,9 @@ from collections import deque
 load_dotenv()
 GEMINI_KEY = os.getenv("Gemini_key")
 GPT_KEY = os.getenv("GPT_key")
+
+# pypdf warns loudly about recoverable damage (missing EOF etc), keep the console clean
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 GEMINI_MODEL = "gemini-3.8-flash"
 GPT_MODEL = "gpt-6-luna"
@@ -64,6 +71,77 @@ def IMG_to_pdf(file_path):
     output_path = file_path
     ocrmypdf.ocr(file_path,output_path,deskew=True,skip_text=True)
     return output_path
+
+
+def read_all_pages(pdf_reader):
+    text = ""
+    for page in range(len(pdf_reader.pages)):
+        text += pdf_reader.pages[page].extract_text() or ""
+    return text
+
+
+def repair_pdf(content):
+    # qpdf (via pikepdf) rebuilds broken xref tables / missing EOF markers and
+    # drops encryption that only uses an empty user password
+    with pikepdf.open(BytesIO(content)) as pdf:
+        out = BytesIO()
+        pdf.save(out)
+        return out.getvalue()
+
+
+def open_pdf(content):
+    """Return (reader, pdf_bytes). pdf_bytes may be a repaired copy of content."""
+    if not content:
+        raise ValueError("empty response, no pdf data")
+
+    # some servers return an html error page (or leading junk) instead of a pdf
+    start = content.find(b"%PDF", 0, 1024)
+    if start == -1:
+        raise ValueError(f"not a pdf (starts with {content[:40]!r})")
+    content = content[start:]
+
+    try:
+        reader = PdfReader(BytesIO(content), strict=False)
+        if reader.is_encrypted:
+            reader.decrypt("")
+        # touch the pages so broken files fail here, not halfway through extraction
+        len(reader.pages)
+        return reader, content
+    except Exception as first_error:
+        try:
+            content = repair_pdf(content)
+        except Exception:
+            raise first_error
+        reader = PdfReader(BytesIO(content), strict=False)
+        if reader.is_encrypted:
+            reader.decrypt("")
+        return reader, content
+
+
+def pdf_text_from_bytes(content, ocr_lock=None):
+    pdf_reader, content = open_pdf(content)
+
+    if not need_ocr(pdf_reader):
+        return read_all_pages(pdf_reader)
+
+    # ocrmypdf refuses encrypted input, hand it a decrypted copy
+    if pdf_reader.is_encrypted:
+        content = repair_pdf(content)
+
+    # ocr works on a temp copy, so local input files are never modified
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        if ocr_lock is not None:
+            with ocr_lock:
+                IMG_to_pdf(tmp_path)
+        else:
+            IMG_to_pdf(tmp_path)
+        return read_all_pages(PdfReader(tmp_path, strict=False))
+    finally:
+        os.remove(tmp_path)
 
 # NOTE: rate limiting for web.archive.org downloads
 
@@ -127,6 +205,8 @@ def retry_after_seconds(response):
 
 
 def fetch_pdf(pdf_url,source=None):
+    # csv cells often carry trailing spaces/newlines, which requests encodes into the url (404)
+    pdf_url = str(pdf_url).strip()
     # only rows whose source is "wayback" go through the shared limiter
     if not is_wayback(source):
         response = HTTP.get(pdf_url, timeout=30)
@@ -158,33 +238,10 @@ def extract_pdf_text(pdf_url,source=None):
 
     try:
         response = fetch_pdf(pdf_url,source)
-
-        pdf_file = BytesIO(response.content)
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
-
-        if need_ocr(pdf_reader):
-
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(response.content)
-                tmp_path = tmp.name
-
-            try:
-                IMG_to_pdf(tmp_path)
-                pdf_reader = PyPDF2.PdfReader(tmp_path)
-                text = ""
-                for page in range(len(pdf_reader.pages)):
-                    text += pdf_reader.pages[page].extract_text() or ""
-            finally:
-                os.remove(tmp_path)
-        else:
-            text = ""
-            for page in range(len(pdf_reader.pages)):
-                text += pdf_reader.pages[page].extract_text() or ""
-
         # edit amount of text extracted here
-        return text
+        return pdf_text_from_bytes(response.content)
     except Exception as e:
-        print(f"error processing pdf: {e}")
+        print(f"error processing pdf {pdf_url}: {e}")
         return None
 
 

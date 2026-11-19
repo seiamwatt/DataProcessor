@@ -27,6 +27,7 @@ from rich.text import Text
 
 from dataprocessor.config import load_env
 from dataprocessor.analysis_v2_vip import analysis_v2 as analysis
+from dataprocessor.analysis_v2_vip import matching
 from dataprocessor.analysis_v2_section import prompts
 from dataprocessor.theme import (
     ACCENT, ACCENT_BAR, OK_BAR, ERR_BAR, EMPHASIS, MUTED, OK,
@@ -37,7 +38,9 @@ console = Console()
 os.environ["TERM"] = "xterm-256color"
 load_env()
 
-# output = url, file, status columns, then analysis columns; match back to the main dataset on url or file
+# output = source csv columns untouched, Document_ID/Document_type/Source_URL, file, status columns, analysis columns
+# csv input: the source csv is the input itself
+# folder input: the source csv is asked for, each pdf is matched to its row in matching.py
 ID_COLUMNS = ["url", "file"]
 STATUS_COLUMNS = ["Coding_status", "Review_scope", "Coding_notes"]
 MODEL_PREFIXES = {"gemini": "gm", "gpt": "gpt"}
@@ -48,9 +51,9 @@ OUTPUT_COLUMNS = ID_COLUMNS + STATUS_COLUMNS + [
 ]
 DEFAULT_WORKERS = int(os.getenv("VIP_WORKERS", 60))
 
-# folder input gets these columns instead of the csv's
-FILE_COL = "file_name"
-PATH_COL = "file_path"
+# folder input gets these internal columns (never written), named so they cannot clash with the source csv
+FILE_COL = "__pdf_name"
+PATH_COL = "__pdf_path"
 
 
 def analysis_section_panel() -> Panel:
@@ -79,11 +82,12 @@ def args_table() -> Table:
 
     required = Text("Yes", style=f"bold {RED}")
     optional = Text("No", style=GREEN)
-    table.add_row("Input path", "CSV file of PDF URLs, or a folder of PDF files", required, "—")
+    table.add_row("Input path", "CSV file of report URLs (PDF or webpage), or a folder of PDF/HTML files", required, "—")
     table.add_row("Output path", "Destination CSV file name or folder", required, "—")
     table.add_row("Start row", "First row / file to process", optional, "0")
     table.add_row("End row", "Row / file at which processing stops", optional, "End of input")
-    table.add_row("Column name", "CSV column containing the PDF URL", optional, "url")
+    table.add_row("Column name", "CSV column containing the report URL", optional, "url")
+    table.add_row("Source CSV", "Folder input: main dataset the reports were downloaded from", required, "—")
     table.add_row("Models", "LLMs to run on each report", optional, "gpt")
     table.add_row("Workers", "Reports processed at once", optional, str(DEFAULT_WORKERS))
     return table
@@ -111,7 +115,7 @@ def clean_path(path):
 def load_pdf_folder(folder):
     names = sorted(
         name for name in os.listdir(folder)
-        if name.lower().endswith(".pdf") and not name.startswith(".")
+        if name.lower().endswith((".pdf",) + analysis.HTML_EXTENSIONS) and not name.startswith(".")
     )
     return pd.DataFrame({
         FILE_COL: names,
@@ -120,19 +124,19 @@ def load_pdf_folder(folder):
 
 
 # document and coding status fields for one report
-def status_record(has_text, model_results, models):
+SCOPE_BY_KIND = {"pdf": "Full extracted PDF text", "html": "Full extracted webpage text"}
+
+
+def status_record(has_text, kind, model_results, models):
     # no text means no model was called, so nothing counts as failed
     failed = [model for model in models if has_text and model_results.get(model) is None]
 
     if not has_text:
         status = "Pending"
         scope = "No text extracted"
-    elif failed:
-        status = "Awaiting review"
-        scope = "Full extracted PDF text"
     else:
-        status = "Completed"
-        scope = "Full extracted PDF text"
+        status = "Awaiting review" if failed else "Completed"
+        scope = SCOPE_BY_KIND.get(kind, "Full extracted text")
 
     notes = f"LLM coders: {', '.join(f'{m} {MODEL_NAMES[m]}' for m in models)}; {datetime.now():%Y-%m-%d}; protocol {prompts.PROTOCOL_VERSION}"
     if failed:
@@ -145,7 +149,7 @@ def status_record(has_text, model_results, models):
     }
 
 
-# folder input: the pdf's name; csv input: the last part of the url
+# folder input: the file's name; csv input: the last part of the url
 def file_name(row, col_name, is_folder):
     if is_folder:
         return row[FILE_COL]
@@ -158,11 +162,12 @@ ANALYZE = {"gpt": analysis.gpt_analyze, "gemini": analysis.gemini_analyze}
 # one report end to end: extract text, call each model, build the output row
 # never raises, so one bad report cannot stop the run
 def process_row(source, file_name, is_file, clients, progress):
+    kind = None
     try:
         if is_file:
-            text = analysis.extract_pdf_text_file(source)
+            text, kind = analysis.extract_text_file(source)
         else:
-            text = analysis.extract_pdf_text_url(source)
+            text, kind = analysis.extract_text_url(source)
         prompt = analysis.build_prompt(text)
     except Exception as e:
         progress.console.print(f"[{ERR_BAR}] ERR [/] [{RED}]extract failed:[/] [{MUTED}]{source}: {e}[/]")
@@ -178,7 +183,7 @@ def process_row(source, file_name, is_file, clients, progress):
                 model_results[model] = None
 
     result_row = {"url": "" if is_file else source, "file": file_name}
-    result_row.update(status_record(prompt is not None, model_results, list(clients)))
+    result_row.update(status_record(prompt is not None, kind, model_results, list(clients)))
 
     for model, prefix in MODEL_PREFIXES.items():
         result = model_results.get(model)
@@ -191,14 +196,15 @@ def process_row(source, file_name, is_file, clients, progress):
 
 
 def ask_config():
-    input_path = clean_path(questionary.path("Input CSV file or PDF folder:", style=PROMPT_STYLE).ask())
+    input_path = clean_path(questionary.path("Input CSV file or report folder (PDF/HTML):", style=PROMPT_STYLE).ask())
 
     is_folder = os.path.isdir(input_path)
     if is_folder:
         df = load_pdf_folder(input_path)
         if df.empty:
             raise ValueError("no pdf files in folder")
-        console.print(f"[{MUTED}]Found {len(df):,} PDF files.[/]")
+        console.print(f"[{MUTED}]Found {len(df):,} report files (PDF/HTML).[/]")
+        df, meta_columns = ask_source(df)
         col_name = PATH_COL
         base_dir = input_path
         input_name = os.path.basename(os.path.normpath(input_path))
@@ -206,6 +212,7 @@ def ask_config():
         df = analysis.load_csv(input_path)
         if df is None:
             raise ValueError("could not read csv")
+        meta_columns = list(df.columns)
         col_name = None
         base_dir = os.path.dirname(input_path)
         input_name = os.path.splitext(os.path.basename(input_path))[0]
@@ -234,7 +241,49 @@ def ask_config():
     if os.path.isdir(output_path):
         output_path = os.path.join(output_path, f"{input_name}_analysis.csv")
 
-    return df, is_folder, output_path, start_row, end_row, col_name, models, workers
+    return df, is_folder, meta_columns, output_path, start_row, end_row, col_name, models, workers
+
+
+# folder input: ask for the main dataset and attach each pdf's row to it
+def ask_source(folder_df):
+    source_path = clean_path(questionary.path("Source CSV (main dataset the reports came from):", style=PROMPT_STYLE).ask())
+    source = analysis.load_csv(source_path)
+    if source is None:
+        raise ValueError("could not read source csv")
+    if "url" not in source.columns:
+        raise ValueError(f"source csv has no url column (found: {', '.join(source.columns)})")
+
+    df, how = matching.attach_source(folder_df, source, FILE_COL)
+    counts = how.value_counts()
+    matched = int(counts.get("file name", 0) + counts.get("file column", 0))
+    console.print(f"[{MUTED}]Matched {matched:,} / {len(df):,} reports to the source csv.[/]")
+
+    missed = how[~how.isin(["file name", "file column"])]
+    if len(missed):
+        for name, result in list(zip(df.loc[missed.index, FILE_COL], missed))[:10]:
+            console.print(f"[{MUTED}]  {result}: {name}[/]")
+        if len(missed) > 10:
+            console.print(f"[{MUTED}]  … and {len(missed) - 10:,} more[/]")
+        if not questionary.confirm(
+            f"{len(missed):,} reports have no source row; analyse them with empty metadata?",
+            default=True, style=PROMPT_STYLE,
+        ).ask():
+            raise ValueError("unmatched pdfs, run cancelled")
+
+    return df, list(source.columns)
+
+
+# source csv values first, then derived document fields, then status and analysis values
+def output_record(row, result_row, meta_columns):
+    record = {col: row[col] for col in meta_columns}
+    for key, value in matching.document_fields(record).items():
+        record.setdefault(key, value)
+    for key, value in result_row.items():
+        # an existing url/file column in the source csv is not overwritten
+        if key in ID_COLUMNS and key in record:
+            continue
+        record[key] = value
+    return record
 
 
 def show():
@@ -251,7 +300,7 @@ def show():
 
         while True:
             try:
-                df, is_folder, output_path, start_row, end_row, col_name, models, workers = ask_config()
+                df, is_folder, meta_columns, output_path, start_row, end_row, col_name, models, workers = ask_config()
                 break
             except Exception as e:
                 console.print(f"[{ERR_BAR}] ERR [/] [{RED}]Invalid input ({e}).[/] [{MUTED}]Check the path, column name and numeric fields, then try again.[/]")
@@ -266,6 +315,12 @@ def show():
 
         df_subset = df.iloc[start_row:end_row]
         total = len(df_subset)
+
+        # the url lives in the source csv's own column, so no extra url column
+        output_columns = meta_columns + [
+            col for col in matching.DERIVED_COLUMNS + OUTPUT_COLUMNS
+            if col != "url" and col not in meta_columns
+        ]
 
         console.print(Rule(Text(" Processing ", style=ACCENT_BAR), style=ACCENT))
 
@@ -285,18 +340,19 @@ def show():
             ok_count = 0
 
             with ThreadPoolExecutor(max_workers=workers) as pool:
+                rows = [row for _, row in df_subset.iterrows()]
                 futures = [
                     pool.submit(process_row, row[col_name], file_name(row, col_name, is_folder), is_folder, clients, progress)
-                    for _, row in df_subset.iterrows()
+                    for row in rows
                 ]
 
                 # write in input order; each row is appended as soon as it and all rows before it are done
-                for future in futures:
-                    result_row = future.result()
+                for row, future in zip(rows, futures):
+                    result_row = output_record(row, future.result(), meta_columns)
                     if result_row["Coding_status"] == "Completed":
                         ok_count += 1
                     write_header = not os.path.exists(output_path)
-                    pd.DataFrame([result_row], columns=OUTPUT_COLUMNS).to_csv(
+                    pd.DataFrame([result_row], columns=output_columns).to_csv(
                         output_path, mode="a", header=write_header, index=False
                     )
                     progress.update(task, advance=1)

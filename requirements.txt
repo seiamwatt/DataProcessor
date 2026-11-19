@@ -6,6 +6,7 @@ botocore>=1.43.46
 python-dotenv
 
 # AI / LLM clients
+anthropic
 google-genai
 openai
 

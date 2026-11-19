@@ -1,5 +1,4 @@
-from openai import OpenAI
-import openai.resources
+import anthropic
 import json
 import argparse
 import requests
@@ -19,7 +18,9 @@ from dataprocessor.analysis_section import prompts
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 console = Console()
 load_dotenv()
-
+CLAUDE_KEY = os.getenv("Claude_key")
+CLAUDE_MODEL = "claude-opus-5-5"
+MAX_TOKENS = 20000
 QUANTITATIVE_COLS = [
     "ID1_Intensity",
     "ISS1_Econ_Pos", "ISS1_Econ_Int",
@@ -113,6 +114,50 @@ def create_reports_batch(url_links):
         reports.append([extracted_text,prompt])
     return reports
 
-def claude_connect():
-    pass
+def connect_claude_helper(prompt,api_key):
+    client = anthropic.Anthropic(
+        api_key = api_key
+    )
+
+    response = client.messages.create(
+        max_tokens = MAX_TOKENS,
+        messages = [
+            {
+                "content": prompt,
+                "role": "user",
+            }
+        ],
+        model = CLAUDE_MODEL
+    )
+    return json.loads(response.content[-1].text)
+
+def claude_batch(reports,api_key):
+    MAX_WORKERS = 50
+    futures = []
+    result_rows = []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        for i in range(len(reports)):
+            pass
+
+
+# one entry per row so results line up with the batch, None url means no adjudication
+def need_adjudicate(df,col_name="url"):
+    url_links = []
+    for i,row in df.iterrows():
+        url = None
+        for col in QUANTITATIVE_COLS:
+            gemini_col = pd.to_numeric(row[f"gm_{col}"], errors="coerce")
+            gpt_col = pd.to_numeric(row[f"gpt_{col}"], errors="coerce")
+
+            # a model failed on this field, nothing to compare
+            if pd.isna(gemini_col) or pd.isna(gpt_col):
+                continue
+
+            if abs(gemini_col - gpt_col) >= THRESHOLD:
+                url = row[col_name]
+                break
+        url_links.append(url)
+
+    return create_reports_batch(url_links)
 

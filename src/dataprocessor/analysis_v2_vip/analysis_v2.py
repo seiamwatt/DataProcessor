@@ -6,18 +6,11 @@ from google import genai
 from google.genai import types
 import json
 import os
-import tempfile
+import re
 import threading
-from io import BytesIO
 
-import pikepdf
 import requests
-# pypdf (not PyPDF2) decrypts AES pdfs with the `cryptography` package
-# and is more tolerant of damaged files
-from pypdf import PdfReader
-import logging
-# pypdf warns loudly about recoverable damage (missing EOF etc), keep the console clean
-logging.getLogger("pypdf").setLevel(logging.ERROR)
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from tenacity import (
     retry,
@@ -27,11 +20,10 @@ from tenacity import (
 )
 
 from dataprocessor.analysis_v2_section import prompts
-# shared with the batch section: csv loading and the ocr check
+# shared with the batch section: csv loading and pdf text extraction
 from dataprocessor.analysis_v2_section.analysis_v2 import (
     load_csv,
-    need_ocr,
-    IMG_to_pdf,
+    pdf_text_from_bytes as shared_pdf_text_from_bytes,
 )
 
 load_dotenv()
@@ -56,92 +48,85 @@ OCR_LOCK = threading.Lock()
 
 
 # NOTE: text extraction
+# a report is either a pdf or the webpage itself; extract_* return (text, kind), kind "pdf" or "html"
 
-def read_all_pages(pdf_reader):
-    text = ""
-    for page in range(len(pdf_reader.pages)):
-        text += pdf_reader.pages[page].extract_text() or ""
-    return text
-
-
-def repair_pdf(content):
-    # qpdf (via pikepdf) rebuilds broken xref tables / missing EOF markers and
-    # drops encryption that only uses an empty user password
-    with pikepdf.open(BytesIO(content)) as pdf:
-        out = BytesIO()
-        pdf.save(out)
-        return out.getvalue()
-
-
-def open_pdf(content):
-    """Return (reader, pdf_bytes). pdf_bytes may be a repaired copy of content."""
-    if not content:
-        raise ValueError("empty response, no pdf data")
-
-    # some servers return an html error page (or leading junk) instead of a pdf
-    start = content.find(b"%PDF", 0, 1024)
-    if start == -1:
-        raise ValueError(f"not a pdf (starts with {content[:40]!r})")
-    content = content[start:]
-
-    try:
-        reader = PdfReader(BytesIO(content), strict=False)
-        if reader.is_encrypted:
-            reader.decrypt("")
-        # touch the pages so broken files fail here, not halfway through extraction
-        len(reader.pages)
-        return reader, content
-    except Exception as first_error:
-        try:
-            content = repair_pdf(content)
-        except Exception:
-            raise first_error
-        reader = PdfReader(BytesIO(content), strict=False)
-        if reader.is_encrypted:
-            reader.decrypt("")
-        return reader, content
+HTML_EXTENSIONS = (".html", ".htm")
+# page chrome and non-text parts; wm-* is the wayback machine toolbar
+HTML_DROP_TAGS = ["script", "style", "noscript", "template", "svg", "canvas", "iframe",
+                  "form", "button", "nav", "header", "footer", "aside"]
+WAYBACK_ID = re.compile(r"^wm-", re.I)
+# fewer characters than this is a js-only shell or an error page, not a report
+MIN_HTML_CHARS = 200
 
 
 def pdf_text_from_bytes(content):
-    pdf_reader, content = open_pdf(content)
+    # shared reader (handles AES, missing EOF, non-pdf responses); ocr serialised by our lock
+    return shared_pdf_text_from_bytes(content, ocr_lock=OCR_LOCK)
 
-    if not need_ocr(pdf_reader):
-        return read_all_pages(pdf_reader)
 
-    # ocrmypdf refuses encrypted input, hand it a decrypted copy
-    if pdf_reader.is_encrypted:
-        content = repair_pdf(content)
+def is_pdf(content):
+    return b"%PDF" in content[:1024]
 
-    # ocr works on a temp copy, so local input files are never modified
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
 
+def is_html(content, content_type=""):
+    if "html" in (content_type or "").lower():
+        return True
+    head = content[:2048].lower()
+    return b"<!doctype html" in head or b"<html" in head or b"<body" in head
+
+
+def html_text_from_bytes(content):
+    # bs4 reads the charset from the page's meta tag, falls back to a best guess
+    soup = BeautifulSoup(content, "lxml")
+    for tag in soup(HTML_DROP_TAGS):
+        tag.decompose()
+    for tag in soup.find_all(id=WAYBACK_ID):
+        tag.decompose()
+
+    root = soup.find("main") or soup.find("article") or soup.body or soup
+    lines = (line.strip() for line in root.get_text("\n").splitlines())
+    text = "\n".join(line for line in lines if line)
+
+    title = soup.title.get_text(strip=True) if soup.title else ""
+    if title and not text.startswith(title):
+        text = f"{title}\n\n{text}"
+
+    if len(text) < MIN_HTML_CHARS:
+        raise ValueError(f"webpage has almost no text ({len(text)} chars), likely js-only or an error page")
+    # the prompt asks for pdf page locators, a webpage has none
+    return f"[Source is a webpage, not a PDF: it has no page numbers, cite by section and paragraph.]\n\n{text}"
+
+
+def text_from_bytes(content, content_type=""):
+    # pdf first: some servers label pdfs text/html
+    if is_pdf(content):
+        return pdf_text_from_bytes(content), "pdf"
+    if is_html(content, content_type):
+        return html_text_from_bytes(content), "html"
+    # neither, the pdf reader raises a clear "not a pdf" error
+    return pdf_text_from_bytes(content), "pdf"
+
+
+def extract_text_url(url):
     try:
-        with OCR_LOCK:
-            IMG_to_pdf(tmp_path)
-        return read_all_pages(PdfReader(tmp_path, strict=False))
-    finally:
-        os.remove(tmp_path)
-
-
-def extract_pdf_text_url(pdf_url):
-    try:
-        response = HTTP.get(pdf_url, timeout=60)
+        # csv cells often carry trailing spaces/newlines, which requests encodes into the url (404)
+        response = HTTP.get(str(url).strip(), timeout=60)
         response.raise_for_status()
-        return pdf_text_from_bytes(response.content)
+        return text_from_bytes(response.content, response.headers.get("Content-Type", ""))
     except Exception as e:
-        print(f"error processing pdf {pdf_url}: {e}")
-        return None
+        print(f"error processing report {url}: {e}")
+        return None, None
 
 
-def extract_pdf_text_file(file_path):
+def extract_text_file(file_path):
     try:
         with open(file_path,"rb") as f:
-            return pdf_text_from_bytes(f.read())
+            content = f.read()
+        content_type = "text/html" if file_path.lower().endswith(HTML_EXTENSIONS) else ""
+        return text_from_bytes(content, content_type)
     except Exception as e:
-        print(f"error processing pdf {file_path}: {e}")
-        return None
+        print(f"error processing report {file_path}: {e}")
+        return None, None
 
 
 def build_prompt(extracted_text):

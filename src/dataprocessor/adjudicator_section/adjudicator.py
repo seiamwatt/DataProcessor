@@ -103,6 +103,21 @@ def extract_pdf_text(pdf_url):
         print(f"error processing pdf: {e}")
         return None
 
+def create_reports_batch(url_links):
+    reports = []
+    for url in url_links:
+        # row did not need adjudication, deepseek_batch skips None prompts
+        if url is None:
+            reports.append([None,None])
+            continue
+        extracted_text = extract_pdf_text(url)
+        if not extracted_text:
+            print(f"skipping {url}: no text extracted")
+            reports.append([extracted_text,None])
+            continue
+        prompt = [{"role": "user", "content": prompts.construct_system_prompt(extracted_text)}]
+        reports.append([extracted_text,prompt])
+    return reports
 
 def connect_deepseek_helper(prompt,api_key):
     client = OpenAI(
@@ -145,21 +160,6 @@ def deepseek_batch(reports,api_key):
 
     return result_rows
 
-def create_reports_batch(url_links):
-    reports = []
-    for url in url_links:
-        # row did not need adjudication, deepseek_batch skips None prompts
-        if url is None:
-            reports.append([None,None])
-            continue
-        extracted_text = extract_pdf_text(url)
-        if not extracted_text:
-            print(f"skipping {url}: no text extracted")
-            reports.append([extracted_text,None])
-            continue
-        prompt = [{"role": "user", "content": prompts.construct_system_prompt(extracted_text)}]
-        reports.append([extracted_text,prompt])
-    return reports
 
 # one entry per row so results line up with the batch, None url means no adjudication
 def need_adjudicate(df,col_name="url"):

@@ -36,6 +36,7 @@ dependencies = [
     # Date / time
     "pytz",
     "pywebview>=6.2.1",
+    "anthropic>=2.8.0",
 ]
 
 [project.scripts]

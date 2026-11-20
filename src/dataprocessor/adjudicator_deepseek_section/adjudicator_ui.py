@@ -38,8 +38,8 @@ import re
 import json
 from concurrent.futures import ThreadPoolExecutor
 
-from dataprocessor.adjudicator_section import adjudicator
-from dataprocessor.adjudicator_section import prompts
+from dataprocessor.adjudicator_deepseek_section import adjudicator
+from dataprocessor.adjudicator_deepseek_section import prompts
 
 console = Console()
 os.environ["TERM"] = "xterm-256color"

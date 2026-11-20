@@ -56,18 +56,19 @@ except importlib.metadata.PackageNotFoundError:
 console = Console()
 # ---------------------------------------------------------------------------------
 # UI ---------------------------------------------------------------------------
+# compact half-block art, 33 columns wide so the panel fits a ~38 column window
+WELCOME_ART = f"""[{RED}]█▀▄ ▄▀█ ▀█▀ ▄▀█
+█▄▀ █▀█  █  █▀█[/]
+[{BLUE}]█▀█ █▀█ █▀█ █▀▀ █▀▀ █▀ █▀ █▀█ █▀█
+█▀▀ █▀▄ █▄█ █▄▄ ██▄ ▄█ ▄█ █▄█ █▀▄[/]"""
+WELCOME_ART_WIDTH = 33
+
 def welcome_panel() -> Panel:
-    art = f"""[{RED}]
- ████   █████  ██████  █████ 
- ██  ██ ██  ██   ██   ██  ██ 
- ██  ██ █████    ██   █████  
- ████   ██  ██   ██   ██  ██ 
-[{BLUE}]
- ████  ████   ████   ████  ████  █████  █████  ████  ████ 
- ██  █ ██  █ ██  ██ ██    ██    ██     ██     ██  ██ ██  █
- ████  ████  ██  ██ ██    ████   ███    ███  ██  ██ ████ 
- ██    ██  █  ████   ████  ████ █████  █████  ████  ██  █
-"""
+    # panel border and padding take 4 columns, fall back to plain text below that
+    if console.width >= WELCOME_ART_WIDTH + 4:
+        art = WELCOME_ART
+    else:
+        art = f"[bold {RED}]DATA[/] [bold {BLUE}]PROCESSOR[/]"
     return Panel(art, subtitle=f"[{MUTED}]version: {version}",
                  border_style=ACCENT_DIM, box=box.SQUARE)
     
